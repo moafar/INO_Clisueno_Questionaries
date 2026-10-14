@@ -15,7 +15,13 @@ from src.client import get_cuestionarios
 def test_rechaza_intervalos_invalidos(inicio, fin):
     with pytest.raises(ValueError):
         get_cuestionarios(
-            settings=None,
+            settings=Settings(
+                base_url="https://example.com",
+                app_id="test-id",
+                app_key="test-key",
+                resource="test-resource",
+                api_version="1",
+            ),
             token="token-ficticio",
             fecha_inicial=inicio,
             fecha_final=fin,
