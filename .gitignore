@@ -1,0 +1,23 @@
+# Entorno virtual
+.venv/
+
+# Credenciales y configuración sensible
+.env
+.env.*
+!.env.example
+*postman_environment*.json
+
+# Datos clínicos y extracciones
+data/
+*.csv
+*.xlsx
+*.parquet
+
+# Archivos temporales de Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Logs
+*.log
