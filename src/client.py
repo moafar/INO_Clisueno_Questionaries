@@ -1,6 +1,8 @@
 from datetime import date
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.config import Settings
 
@@ -34,13 +36,31 @@ def get_cuestionarios(
         "fechaFinal": fecha_final.isoformat(),
     }
 
+    retry = Retry(
+        total=2,
+        connect=2,
+        read=0,
+        status=2,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods={"POST"},
+        respect_retry_after_header=True,
+    )
+
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
     try:
-        response = requests.post(
+        response = session.post(
             url,
             headers=headers,
             data=data,
             timeout=(10, 120),
         )
+
         response.raise_for_status()
         payload = response.json()
 
@@ -48,6 +68,8 @@ def get_cuestionarios(
         raise MedicloudAPIError(
             "Error de comunicación o respuesta inválida de MediCloud"
         ) from exc
+    finally:
+        session.close()
 
     if (
         not isinstance(payload, dict)

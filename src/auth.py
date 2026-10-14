@@ -1,4 +1,7 @@
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.config import Settings
 
@@ -17,8 +20,25 @@ def get_access_token(settings: Settings) -> str:
         "ApiVersion": settings.api_version,
     }
 
+    retry = Retry(
+        total=2,  # 2 reintentos + 1 intento inicial
+        connect=2,
+        read=0,
+        status=2,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods={"POST"},
+        respect_retry_after_header=True,
+    )
+
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
     try:
-        response = requests.post(
+        response = session.post(
             url,
             headers=headers,
             timeout=(10, 30),
@@ -30,6 +50,9 @@ def get_access_token(settings: Settings) -> str:
         raise MedicloudAuthError(
             "Error de comunicación o respuesta inválida de MediCloud"
         ) from exc
+
+    finally:
+        session.close()
 
     if (
         not isinstance(payload, dict)
