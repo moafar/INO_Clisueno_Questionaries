@@ -76,10 +76,10 @@ silenciosamente como cargas satisfactorias.
 
 ### 2.3. Persistencia PostgreSQL
 
-- [ ] Definir esquema y tabla de destino.
-- [ ] Definir tipos de datos y restricciones.
+- [x] Definir destino local `obsino.staging.clisueno_questionaries`.
+- [x] Proponer tipos de datos y restricciones en migración SQL (pendiente de revisión y ejecución local).
 - [ ] Determinar la clave única de cada cuestionario.
-- [ ] Crear migración SQL inicial.
+- [x] Crear `sql/001_create_clisueno_questionaries.sql` (no ejecutada).
 - [ ] Implementar conexión mediante `psycopg`.
 - [ ] Implementar inserciones idempotentes.
 - [ ] Incorporar transacciones.
@@ -231,9 +231,9 @@ Pendientes inmediatos:
 - [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (pendiente de pruebas locales).
 - [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
       unicidad por lote y estabilidad entre consultas).
-- [ ] Definir esquema, tabla, restricciones y migración SQL para PostgreSQL.
+- [x] Preparar esquema, tabla, restricciones y migración SQL local (pendiente de ejecutar).
 - [ ] Implementar carga transaccional idempotente, control de hash y auditoría.
 - [ ] No considerar procesado un día antes del commit de persistencia.
 
-La ejecución actual con código de salida 0 significa **extracción y validación**,
+La migración SQL propuesta no se ha ejecutado. La semántica global de `id` sigue pendiente de confirmación.\n\nLa ejecución actual con código de salida 0 significa **extracción y validación**,
 no carga persistida ni día definitivamente procesado.
