@@ -8,7 +8,7 @@
 
 **Rama Git:** `main`.
 
-**Pruebas:** 12 superadas.
+**Pruebas:** 24 superadas antes de incorporar la validación; pruebas nuevas pendientes de ejecutar.
 
 **Prioridad actual:** completar la extracción diaria y su persistencia
 segura en PostgreSQL.
@@ -31,7 +31,7 @@ La extracción histórica queda aplazada.
 - [x] Implementar reintentos HTTP en extracción.
 - [x] Validar reintentos mediante servidores HTTP locales.
 - [x] Implementar cálculo del día anterior en `America/Bogota`.
-- [x] Ejecutar 12 pruebas automatizadas satisfactoriamente.
+- [x] Ejecutar 24 pruebas automatizadas satisfactoriamente (hasta logging JSON).
 - [x] Validar código mediante Ruff.
 - [x] Crear documentación inicial en `README.md`.
 
@@ -57,14 +57,14 @@ la persistencia y las validaciones correspondientes.
 
 ### 2.2. Validación de datos
 
-- [ ] Definir el contrato de datos de la API.
-- [ ] Identificar campos obligatorios.
+- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (pendiente de pruebas locales).
+- [x] Definir `id` y `fecha` como obligatorios en el contrato mínimo.
 - [ ] Determinar el significado y alcance del campo `id`.
-- [ ] Verificar unicidad y ausencia de identificadores nulos.
-- [ ] Validar fechas de los cuestionarios.
-- [ ] Definir el tratamiento de registros inválidos.
+- [x] Validar unicidad por lote y ausencia de identificadores nulos.
+- [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
+- [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
 - [ ] Detectar cambios inesperados de esquema.
-- [ ] Crear pruebas de validación.
+- [x] Crear `tests/test_validation.py` (pendientes de ejecución local).
 
 **Criterio de aceptación:**
 
@@ -216,18 +216,11 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Implementar la validación de datos de los cuestionarios MediCloud.**
+**Ejecutar y revisar localmente las pruebas de `src/validation.py`.**
 
-### Estado actual
-- Extracción diaria implementada.
-- Logging estructurado JSON implementado.
-- 24 pruebas automatizadas superadas.
-- Ruff sin errores.
-- Último commit de código: `5b58638`.
-
-### Próximo objetivo
-Definir y validar el contrato de datos de la API,
-incluyendo campos obligatorios, identificadores únicos,
-fechas, registros inválidos y cambios de esquema.
+El contrato mínimo valida `id`, `fecha`, unicidad por lote y estructura
+de listas de medicamentos; conserva intactas las respuestas originales.
+Pendiente verificar las pruebas en WSL y Ruff, monitorizar deriva de esquema,
+y conectar la validación al flujo diario antes de persistir.
 
 La persistencia PostgreSQL continúa pendiente.
