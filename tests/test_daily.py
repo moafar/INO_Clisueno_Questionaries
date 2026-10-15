@@ -8,6 +8,7 @@ import pytest
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
 from src.daily import main
+from src.validation import QuestionnaireValidationError
 
 
 @patch("src.daily.get_cuestionarios")
@@ -19,7 +20,10 @@ def test_extraccion_correcta(
 ):
     mock_fecha.return_value = date(2026, 10, 14)
     mock_token.return_value = "token-ficticio"
-    mock_cuestionarios.return_value = [{"id": 1}, {"id": 2}]
+    mock_cuestionarios.return_value = [
+        {"id": 1, "fecha": "2026-10-14"},
+        {"id": 2, "fecha": "2026-10-14"},
+    ]
 
     assert main() == 0
 
@@ -90,3 +94,55 @@ def test_errores_no_exponen_detalles_en_logs(exception, caplog):
 
     assert "Error" not in caplog.text
     assert "La extracción diaria ha fallado." in caplog.text
+
+
+@patch("src.daily.validate_questionnaires")
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token")
+@patch("src.daily.previous_day")
+@patch("src.daily.load_settings")
+def test_diario_valida_lote_y_fecha(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_validate
+):
+    fecha = date(2026, 10, 14)
+    mock_fecha.return_value = fecha
+    mock_token.return_value = "token-ficticio"
+    lote = [{"id": 1, "fecha": fecha.isoformat()}]
+    mock_cuestionarios.return_value = lote
+
+    assert main() == 0
+    mock_validate.assert_called_once_with(lote, fecha, fecha)
+
+
+@patch("src.daily.validate_questionnaires")
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token")
+@patch("src.daily.previous_day")
+@patch("src.daily.load_settings")
+def test_error_validacion_no_marca_exito(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_validate, caplog
+):
+    mock_fecha.return_value = date(2026, 10, 14)
+    mock_token.return_value = "token-ficticio"
+    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-14"}]
+    mock_validate.side_effect = QuestionnaireValidationError(
+        "contenido clínico confidencial"
+    )
+
+    assert main() == 1
+    assert "contenido clínico confidencial" not in caplog.text
+    assert "La extracción diaria ha fallado." in caplog.text
+
+
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token")
+@patch("src.daily.previous_day")
+@patch("src.daily.load_settings")
+def test_lote_realmente_invalido_se_rechaza(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios
+):
+    mock_fecha.return_value = date(2026, 10, 14)
+    mock_token.return_value = "token-ficticio"
+    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-13"}]
+
+    assert main() == 1
