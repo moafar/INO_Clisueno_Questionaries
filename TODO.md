@@ -8,7 +8,7 @@
 
 **Rama Git:** `main`.
 
-**Pruebas:** 46 superadas en WSL antes de integrar la validación en el flujo diario. Nuevas pruebas de integración pendientes.
+**Pruebas:** 49 superadas en WSL (15-oct-2026). Ruff sin errores.
 
 **Prioridad actual:** completar la extracción diaria y su persistencia
 segura en PostgreSQL.
@@ -41,7 +41,8 @@ La extracción histórica queda aplazada.
 
 - [x] Crear `src/daily.py`.
 - [x] Integrar configuración, autenticación y extracción.
-- [x] Integrar validación del lote en `src/daily.py` (pendiente de pruebas locales).
+- [x] Integrar validación del lote en `src/daily.py` (49 pruebas superadas en WSL).
+- [x] Ejecutar extracción real del día anterior en Colombia (2026-10-14: 59 cuestionarios recibidos y validados, sin persistencia).
 - [x] Incorporar logging estructurado.
 - [x] Devolver códigos de salida adecuados.
 - [x] Evitar exposición de información sensible en logs.
@@ -64,7 +65,7 @@ la persistencia y las validaciones correspondientes.
 - [x] Validar unicidad por lote y ausencia de identificadores nulos.
 - [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
 - [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
-- [ ] Detectar cambios inesperados de esquema.
+- [ ] Detectar y registrar cambios inesperados de esquema sin exponer valores clínicos.
 - [x] Crear `tests/test_validation.py` (22 pruebas superadas en WSL).
 
 **Criterio de aceptación:**
@@ -217,12 +218,20 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Probar la integración de la validación en la extracción diaria.**
+**Completar el contrato de validación y preparar la persistencia PostgreSQL.**
 
-- [ ] Ejecutar suite completa y Ruff en WSL tras la integración.
-- [ ] Verificar una extracción real con validación, sin persistencia.
-- [ ] Implementar detección de cambios inesperados de esquema.
-- [ ] Definir persistencia transaccional e idempotente en PostgreSQL.
+Verificado el 15-oct-2026 en WSL:
+- 49 pruebas automatizadas superadas y Ruff sin errores.
+- Ejecución real `python -m src.daily`: 59 cuestionarios de 2026-10-14
+  extraídos y validados; no almacenados en PostgreSQL.
 
-El código de salida 0 significa extracción y validación correctas,
-**no** carga persistida ni fecha procesada definitivamente.
+Pendientes inmediatos:
+- [ ] Establecer detección de cambios inesperados de esquema y su respuesta.
+- [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
+      unicidad por lote y estabilidad entre consultas).
+- [ ] Definir esquema, tabla, restricciones y migración SQL para PostgreSQL.
+- [ ] Implementar carga transaccional idempotente, control de hash y auditoría.
+- [ ] No considerar procesado un día antes del commit de persistencia.
+
+La ejecución actual con código de salida 0 significa **extracción y validación**,
+no carga persistida ni día definitivamente procesado.
