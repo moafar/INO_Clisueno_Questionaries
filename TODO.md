@@ -39,12 +39,12 @@ La extracción histórica queda aplazada.
 
 ### 2.1. Punto de entrada
 
-- [ ] Crear `src/daily.py`.
-- [ ] Integrar configuración, autenticación y extracción.
+- [x] Crear `src/daily.py`.
+- [x] Integrar configuración, autenticación y extracción.
 - [ ] Incorporar logging estructurado.
-- [ ] Devolver códigos de salida adecuados.
-- [ ] Evitar exposición de información sensible.
-- [ ] Crear pruebas automatizadas del proceso diario.
+- [x] Devolver códigos de salida adecuados.
+- [x] Evitar exposición de información sensible en logs.
+- [x] Crear pruebas automatizadas del proceso diario.
 
 **Criterio de aceptación:**
 
@@ -216,11 +216,19 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Implementar y probar `src/daily.py`.**
+**Completar el logging estructurado de `src/daily.py`.**
 
-El primer objetivo será integrar los componentes existentes sin
-persistencia, verificando el comportamiento del punto de entrada
-y sus códigos de salida.
+El punto de entrada diario ya está implementado y cuenta con
+7 pruebas automatizadas.
 
-Posteriormente se incorporarán validación, persistencia y auditoría
-antes de habilitar la ejecución programada.
+Estado de validación:
+- 19 pruebas superadas.
+- Ruff sin errores.
+- Commit: `213f50b`.
+
+Antes de avanzar a la validación de datos y a la persistencia
+en PostgreSQL, se implementará logging estructurado para
+facilitar la auditoría y el diagnóstico de fallos.
+
+La ejecución diaria todavía no constituye una carga exitosa,
+porque no existe persistencia en PostgreSQL.
