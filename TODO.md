@@ -41,7 +41,7 @@ La extracción histórica queda aplazada.
 
 - [x] Crear `src/daily.py`.
 - [x] Integrar configuración, autenticación y extracción.
-- [ ] Incorporar logging estructurado.
+- [x] Incorporar logging estructurado.
 - [x] Devolver códigos de salida adecuados.
 - [x] Evitar exposición de información sensible en logs.
 - [x] Crear pruebas automatizadas del proceso diario.
@@ -216,19 +216,18 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Completar el logging estructurado de `src/daily.py`.**
+**Implementar la validación de datos de los cuestionarios MediCloud.**
 
-El punto de entrada diario ya está implementado y cuenta con
-7 pruebas automatizadas.
-
-Estado de validación:
-- 19 pruebas superadas.
+### Estado actual
+- Extracción diaria implementada.
+- Logging estructurado JSON implementado.
+- 24 pruebas automatizadas superadas.
 - Ruff sin errores.
-- Commit: `213f50b`.
+- Último commit de código: `5b58638`.
 
-Antes de avanzar a la validación de datos y a la persistencia
-en PostgreSQL, se implementará logging estructurado para
-facilitar la auditoría y el diagnóstico de fallos.
+### Próximo objetivo
+Definir y validar el contrato de datos de la API,
+incluyendo campos obligatorios, identificadores únicos,
+fechas, registros inválidos y cambios de esquema.
 
-La ejecución diaria todavía no constituye una carga exitosa,
-porque no existe persistencia en PostgreSQL.
+La persistencia PostgreSQL continúa pendiente.
