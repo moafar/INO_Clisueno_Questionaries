@@ -4,7 +4,7 @@
 
 **Proyecto:** extractor desatendido de cuestionarios de sueño MediCloud.
 
-**Estado:** desarrollo local en WSL.
+**Estado:** desarrollo local en WSL; tabla destino local creada, persistencia de la aplicación pendiente.
 
 **Rama Git:** `main`.
 
@@ -41,7 +41,7 @@ La extracción histórica queda aplazada.
 
 - [x] Crear `src/daily.py`.
 - [x] Integrar configuración, autenticación y extracción.
-- [x] Integrar validación del lote en `src/daily.py` (49 pruebas superadas en WSL).
+- [x] Integrar validación del lote en `src/daily.py` (pruebas locales superadas).
 - [x] Ejecutar extracción real del día anterior en Colombia (2026-10-14: 59 cuestionarios recibidos y validados, sin persistencia).
 - [x] Incorporar logging estructurado.
 - [x] Devolver códigos de salida adecuados.
@@ -59,14 +59,14 @@ la persistencia y las validaciones correspondientes.
 
 ### 2.2. Validación de datos
 
-- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (22 pruebas superadas en WSL).
+- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (pruebas locales superadas).
 - [x] Definir `id` y `fecha` como obligatorios en el contrato mínimo.
 - [ ] Determinar el significado y alcance del campo `id`.
 - [x] Validar unicidad por lote y ausencia de identificadores nulos.
 - [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
 - [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
-- [x] Implementar detección y aviso de deriva de esquema en `src/schema.py` y `src/daily.py` (pendiente de pruebas locales).
-- [x] Crear `tests/test_validation.py` (22 pruebas superadas en WSL).
+- [x] Implementar detección y aviso de deriva de esquema en `src/schema.py` y `src/daily.py` (verificado en la ejecución local).
+- [x] Crear `tests/test_validation.py` y validar el contrato mínimo.
 
 **Criterio de aceptación:**
 
@@ -80,7 +80,7 @@ silenciosamente como cargas satisfactorias.
 - [x] Definir tipos de datos y restricciones; estructura verificada en PostgreSQL local.
 - [ ] Determinar la clave única de cada cuestionario.
 - [x] Crear `sql/001_create_clisueno_questionaries.sql`; DDL de tabla ejecutado y restricciones verificadas en `obsino` local (los COMMENT de la migración no se han confirmado como ejecutados).
-- [ ] Implementar conexión mediante `psycopg`.
+- [ ] Implementar conexión de producción del extractor mediante `psycopg` (`DATABASE_URL` local configurada y conexión manual Python comprobada).
 - [ ] Implementar inserciones idempotentes.
 - [ ] Incorporar transacciones.
 - [ ] Implementar rollback ante errores.
@@ -218,7 +218,7 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Probar detector de deriva de esquema y preparar persistencia PostgreSQL.**
+**Implementar persistencia PostgreSQL segura y pruebas, sin cargar todavía datos reales.**
 
 Verificado el 15-oct-2026 en WSL:
 - 49 pruebas automatizadas superadas y Ruff sin errores.
@@ -226,24 +226,27 @@ Verificado el 15-oct-2026 en WSL:
   extraídos y validados; no almacenados en PostgreSQL.
 
 Pendientes inmediatos:
-- [ ] Ejecutar Ruff y suite completa en WSL tras incorporar `src/schema.py`.
-- [ ] Verificar avisos de esquema en una extracción real.
-- [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (pendiente de pruebas locales).
+- [x] Ejecutar Ruff y suite completa en WSL tras incorporar `src/schema.py` (56 pruebas superadas; última ejecución confirmada).
+- [x] Verificar ejecución real del detector de esquema (2026-10-14: 59 cuestionarios, sin aviso de deriva).
+- [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (revisado con referencia versionada).
 - [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
       unicidad por lote y estabilidad entre consultas).
 - [x] Preparar migración SQL y crear/verificar tabla en PostgreSQL local.
 - [ ] Implementar carga transaccional idempotente, control de hash y auditoría.
 - [ ] No considerar procesado un día antes del commit de persistencia.
 
-La estructura `CREATE TABLE` ya se ejecutó en PostgreSQL local. Los `COMMENT ON` de la migración no se han confirmado como ejecutados. La semántica global de `id` sigue pendiente de confirmación.\n\nLa ejecución actual con código de salida 0 significa **extracción y validación**,
+La estructura `CREATE TABLE` ya se ejecutó en PostgreSQL local. Los `COMMENT ON` de la migración no se han confirmado como ejecutados. La semántica global de `id` sigue pendiente de confirmación.
+
+La ejecución actual con código de salida 0 significa **extracción y validación**,
 no carga persistida ni día definitivamente procesado.
 
 ## Punto seguro de suspensión — 15-oct-2026
 
 - Código remoto `main`: extracción, validación y detección de deriva funcionales; persistencia **no implementada**.
-- Conexión local comprobada desde Python mediante `DATABASE_URL` en `.env` (no versionar secretos).
+- Conexión local comprobada desde Python mediante `DATABASE_URL` en `.env` (no versionar secretos). El proceso `src/daily.py` aún no utiliza esa variable.
 - `obsino.staging.clisueno_questionaries`: ocho columnas, cuatro restricciones verificadas; cero filas antes de cualquier carga.
 - Nombres originales confirmados en `schemas/cuestionarios_v1.json`: `tipoDocumento` -> `tipo_documento`, `Documento` -> `documento`, `Sede` -> `sede`; `id` y `fecha` conservan nombre.
 - La referencia versionada contiene nombres de 179 campos; no determina por sí sola los tipos ni la nulabilidad observados para estos tres campos. Revisar mapeo y reglas de null/vacío antes de insertar.
 - Siguiente tarea: diseñar e implementar `src/storage.py` con SHA-256 determinista, transacciones, idempotencia y rechazo seguro de conflictos; añadir pruebas y luego integrar en `src/daily.py`.
 - No ejecutar carga de datos reales ni dar por procesado un día hasta superar pruebas y validar rollback/commit.
+- Retomar desde este TODO: implementar `src/storage.py` y pruebas sin cambiar todavía el flujo diario; integrar y validar `src/daily.py` después.
