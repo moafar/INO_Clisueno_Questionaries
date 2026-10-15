@@ -65,7 +65,7 @@ la persistencia y las validaciones correspondientes.
 - [x] Validar unicidad por lote y ausencia de identificadores nulos.
 - [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
 - [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
-- [ ] Detectar y registrar cambios inesperados de esquema sin exponer valores clínicos.
+- [x] Implementar detección y aviso de deriva de esquema en `src/schema.py` y `src/daily.py` (pendiente de pruebas locales).
 - [x] Crear `tests/test_validation.py` (22 pruebas superadas en WSL).
 
 **Criterio de aceptación:**
@@ -218,7 +218,7 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Completar el contrato de validación y preparar la persistencia PostgreSQL.**
+**Probar detector de deriva de esquema y preparar persistencia PostgreSQL.**
 
 Verificado el 15-oct-2026 en WSL:
 - 49 pruebas automatizadas superadas y Ruff sin errores.
@@ -226,7 +226,9 @@ Verificado el 15-oct-2026 en WSL:
   extraídos y validados; no almacenados en PostgreSQL.
 
 Pendientes inmediatos:
-- [ ] Establecer detección de cambios inesperados de esquema y su respuesta.
+- [ ] Ejecutar Ruff y suite completa en WSL tras incorporar `src/schema.py`.
+- [ ] Verificar avisos de esquema en una extracción real.
+- [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (pendiente de pruebas locales).
 - [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
       unicidad por lote y estabilidad entre consultas).
 - [ ] Definir esquema, tabla, restricciones y migración SQL para PostgreSQL.
