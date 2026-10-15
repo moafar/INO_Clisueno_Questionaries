@@ -3,12 +3,13 @@
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.auth import MedicloudAuthError, get_access_token
 from src.client import MedicloudAPIError, get_cuestionarios
 from src.config import load_settings
 from src.dates import previous_day
+
 
 class JsonFormatter(logging.Formatter):
     """Formatea los eventos de ejecución como registros JSON."""
@@ -16,7 +17,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
             "timestamp": datetime.fromtimestamp(
-                record.created, tz=timezone.utc
+                record.created, tz=UTC
             ).isoformat(),
             "level": record.levelname,
             "logger": record.name,
