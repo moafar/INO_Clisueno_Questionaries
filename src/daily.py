@@ -1,22 +1,40 @@
 """Punto de entrada de la extracción diaria de cuestionarios MediCloud."""
 
+import json
 import logging
 import sys
+from datetime import datetime, timezone
 
 from src.auth import MedicloudAuthError, get_access_token
 from src.client import MedicloudAPIError, get_cuestionarios
 from src.config import load_settings
 from src.dates import previous_day
 
+class JsonFormatter(logging.Formatter):
+    """Formatea los eventos de ejecución como registros JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "event": record.getMessage(),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+
 logger = logging.getLogger(__name__)
+_json_handler = logging.StreamHandler(sys.stderr)
+_json_handler.setFormatter(JsonFormatter())
 
 
 def main() -> int:
     """Extrae los cuestionarios del día anterior, sin persistirlos."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    logger.setLevel(logging.INFO)
+    if _json_handler not in logger.handlers:
+        logger.addHandler(_json_handler)
 
     try:
         settings = load_settings()
