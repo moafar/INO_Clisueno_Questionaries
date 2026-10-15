@@ -8,7 +8,7 @@
 
 **Rama Git:** `main`.
 
-**Pruebas:** 24 superadas antes de incorporar la validación; pruebas nuevas pendientes de ejecutar.
+**Pruebas:** 46 superadas en WSL antes de integrar la validación en el flujo diario. Nuevas pruebas de integración pendientes.
 
 **Prioridad actual:** completar la extracción diaria y su persistencia
 segura en PostgreSQL.
@@ -41,6 +41,7 @@ La extracción histórica queda aplazada.
 
 - [x] Crear `src/daily.py`.
 - [x] Integrar configuración, autenticación y extracción.
+- [x] Integrar validación del lote en `src/daily.py` (pendiente de pruebas locales).
 - [x] Incorporar logging estructurado.
 - [x] Devolver códigos de salida adecuados.
 - [x] Evitar exposición de información sensible en logs.
@@ -57,14 +58,14 @@ la persistencia y las validaciones correspondientes.
 
 ### 2.2. Validación de datos
 
-- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (pendiente de pruebas locales).
+- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (22 pruebas superadas en WSL).
 - [x] Definir `id` y `fecha` como obligatorios en el contrato mínimo.
 - [ ] Determinar el significado y alcance del campo `id`.
 - [x] Validar unicidad por lote y ausencia de identificadores nulos.
 - [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
 - [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
 - [ ] Detectar cambios inesperados de esquema.
-- [x] Crear `tests/test_validation.py` (pendientes de ejecución local).
+- [x] Crear `tests/test_validation.py` (22 pruebas superadas en WSL).
 
 **Criterio de aceptación:**
 
@@ -216,11 +217,12 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Próxima tarea
 
-**Ejecutar y revisar localmente las pruebas de `src/validation.py`.**
+**Probar la integración de la validación en la extracción diaria.**
 
-El contrato mínimo valida `id`, `fecha`, unicidad por lote y estructura
-de listas de medicamentos; conserva intactas las respuestas originales.
-Pendiente verificar las pruebas en WSL y Ruff, monitorizar deriva de esquema,
-y conectar la validación al flujo diario antes de persistir.
+- [ ] Ejecutar suite completa y Ruff en WSL tras la integración.
+- [ ] Verificar una extracción real con validación, sin persistencia.
+- [ ] Implementar detección de cambios inesperados de esquema.
+- [ ] Definir persistencia transaccional e idempotente en PostgreSQL.
 
-La persistencia PostgreSQL continúa pendiente.
+El código de salida 0 significa extracción y validación correctas,
+**no** carga persistida ni fecha procesada definitivamente.
