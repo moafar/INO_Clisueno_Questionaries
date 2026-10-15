@@ -8,7 +8,7 @@
 
 **Rama Git:** `main`.
 
-**Pruebas:** 49 superadas en WSL (15-oct-2026). Ruff sin errores.
+**Pruebas:** último resultado confirmado en WSL: 56 superadas y Ruff sin errores (15-oct-2026).
 
 **Prioridad actual:** completar la extracción diaria y su persistencia
 segura en PostgreSQL.
@@ -77,9 +77,9 @@ silenciosamente como cargas satisfactorias.
 ### 2.3. Persistencia PostgreSQL
 
 - [x] Definir destino local `obsino.staging.clisueno_questionaries`.
-- [x] Proponer tipos de datos y restricciones en migración SQL (pendiente de revisión y ejecución local).
+- [x] Definir tipos de datos y restricciones; estructura verificada en PostgreSQL local.
 - [ ] Determinar la clave única de cada cuestionario.
-- [x] Crear `sql/001_create_clisueno_questionaries.sql` (no ejecutada).
+- [x] Crear `sql/001_create_clisueno_questionaries.sql`; DDL de tabla ejecutado y restricciones verificadas en `obsino` local (los COMMENT de la migración no se han confirmado como ejecutados).
 - [ ] Implementar conexión mediante `psycopg`.
 - [ ] Implementar inserciones idempotentes.
 - [ ] Incorporar transacciones.
@@ -201,7 +201,7 @@ La carga histórica no forma parte del alcance inmediato.
 | PostgreSQL como destino | Confirmada |
 | Cuestionarios inmutables | Supuesto funcional |
 | Clave única de cuestionario | Pendiente de validar |
-| Tabla PostgreSQL de destino | Pendiente |
+| Tabla PostgreSQL de destino | Creada y verificada en `obsino` local |
 | Control de días pendientes | Pendiente |
 | Carga histórica | Aplazada |
 
@@ -231,9 +231,19 @@ Pendientes inmediatos:
 - [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (pendiente de pruebas locales).
 - [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
       unicidad por lote y estabilidad entre consultas).
-- [x] Preparar esquema, tabla, restricciones y migración SQL local (pendiente de ejecutar).
+- [x] Preparar migración SQL y crear/verificar tabla en PostgreSQL local.
 - [ ] Implementar carga transaccional idempotente, control de hash y auditoría.
 - [ ] No considerar procesado un día antes del commit de persistencia.
 
-La migración SQL propuesta no se ha ejecutado. La semántica global de `id` sigue pendiente de confirmación.\n\nLa ejecución actual con código de salida 0 significa **extracción y validación**,
+La estructura `CREATE TABLE` ya se ejecutó en PostgreSQL local. Los `COMMENT ON` de la migración no se han confirmado como ejecutados. La semántica global de `id` sigue pendiente de confirmación.\n\nLa ejecución actual con código de salida 0 significa **extracción y validación**,
 no carga persistida ni día definitivamente procesado.
+
+## Punto seguro de suspensión — 15-oct-2026
+
+- Código remoto `main`: extracción, validación y detección de deriva funcionales; persistencia **no implementada**.
+- Conexión local comprobada desde Python mediante `DATABASE_URL` en `.env` (no versionar secretos).
+- `obsino.staging.clisueno_questionaries`: ocho columnas, cuatro restricciones verificadas; cero filas antes de cualquier carga.
+- Nombres originales confirmados en `schemas/cuestionarios_v1.json`: `tipoDocumento` -> `tipo_documento`, `Documento` -> `documento`, `Sede` -> `sede`; `id` y `fecha` conservan nombre.
+- La referencia versionada contiene nombres de 179 campos; no determina por sí sola los tipos ni la nulabilidad observados para estos tres campos. Revisar mapeo y reglas de null/vacío antes de insertar.
+- Siguiente tarea: diseñar e implementar `src/storage.py` con SHA-256 determinista, transacciones, idempotencia y rechazo seguro de conflictos; añadir pruebas y luego integrar en `src/daily.py`.
+- No ejecutar carga de datos reales ni dar por procesado un día hasta superar pruebas y validar rollback/commit.
