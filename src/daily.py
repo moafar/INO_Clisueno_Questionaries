@@ -9,6 +9,7 @@ from src.auth import MedicloudAuthError, get_access_token
 from src.client import MedicloudAPIError, get_cuestionarios
 from src.config import load_settings
 from src.dates import previous_day
+from src.validation import QuestionnaireValidationError, validate_questionnaires
 
 
 class JsonFormatter(logging.Formatter):
@@ -51,15 +52,17 @@ def main() -> int:
             fecha_final=fecha,
         )
 
+        validate_questionnaires(cuestionarios, fecha, fecha)
+
         logger.info(
-            "Extracción completada. Fecha: %s. Registros recibidos: %d. "
+            "Extracción y validación completadas. Fecha: %s. Registros recibidos: %d. "
             "Persistencia: pendiente.",
             fecha,
             len(cuestionarios),
         )
         return 0
 
-    except (ValueError, MedicloudAuthError, MedicloudAPIError):
+    except (ValueError, MedicloudAuthError, MedicloudAPIError, QuestionnaireValidationError):
         logger.error("La extracción diaria ha fallado.")
         return 1
 
