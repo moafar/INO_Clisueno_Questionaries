@@ -23,7 +23,7 @@ def validate_questionnaires(
     Los campos clínicos ajenos al contrato mínimo se conservan sin cambios.
     """
     if not isinstance(start_date, date) or not isinstance(end_date, date):
-        raise ValueError("El intervalo requiere fechas válidas")
+        raise TypeError("El intervalo requiere fechas válidas")
     if start_date > end_date:
         raise ValueError("Intervalo de fechas invertido")
     if not isinstance(records, list):
@@ -57,7 +57,7 @@ def validate_questionnaires(
             )
         try:
             parsed_date = date.fromisoformat(raw_date)
-        except ValueError as exc:
+        except ValueError:
             raise QuestionnaireValidationError(
                 f"Registro {position}: fecha inválida"
             ) from None
