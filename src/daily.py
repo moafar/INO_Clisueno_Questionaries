@@ -9,6 +9,7 @@ from src.auth import MedicloudAuthError, get_access_token
 from src.client import MedicloudAPIError, get_cuestionarios
 from src.config import load_settings
 from src.dates import previous_day
+from src.schema import compare_schema, load_reference
 from src.validation import QuestionnaireValidationError, validate_questionnaires
 
 
@@ -53,6 +54,15 @@ def main() -> int:
         )
 
         validate_questionnaires(cuestionarios, fecha, fecha)
+        report = compare_schema(cuestionarios, load_reference())
+        if report.changed:
+            logger.warning(
+                "Cambio de esquema detectado: campos_nuevos=%d "
+                "campos_ausentes=%d registros_inconsistentes=%d",
+                len(report.new_fields),
+                len(report.missing_fields),
+                report.inconsistent_records,
+            )
 
         logger.info(
             "Extracción y validación completadas. Fecha: %s. Registros recibidos: %d. "
