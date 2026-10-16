@@ -3,6 +3,8 @@
 import argparse
 from contextlib import contextmanager
 from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from unittest.mock import call, patch
 
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from src.audit import AuditError, ConcurrentExecutionError, DayResult
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError, MedicloudUnauthorizedError
+from src.config import Settings
 from src.daily import cli, main, parse_iso_date, run_date_range, run_recovery
 from src.validation import QuestionnaireValidationError
 
@@ -873,3 +876,71 @@ def test_http_403_no_renueva_token():
     persist.assert_not_called()
     audit.assert_called_once()
     assert audit.call_args.args[4] == "API_ERROR"
+
+
+def test_http_local_401_token_renovado_y_consulta_repetida_sin_postgres(
+    mocked_daily_lock,
+):
+    """Prueba integración HTTP local de autenticación y extracción completas."""
+
+    class Handler(BaseHTTPRequestHandler):
+        auth_requests = 0
+        api_requests = 0
+
+        def do_POST(self):
+            if self.path == "/auth/getToken":
+                Handler.auth_requests += 1
+                body = (
+                    '{"status":"success","access_token":"token-%d"}'
+                    % Handler.auth_requests
+                ).encode()
+                status = 200
+            elif self.path == "/apisueno/getCuestionarioSueno":
+                Handler.api_requests += 1
+                if self.headers.get("Authorization") == "Bearer token-1":
+                    status = 401
+                    body = b'{"status":"unauthorized"}'
+                else:
+                    assert self.headers.get("Authorization") == "Bearer token-2"
+                    status = 200
+                    body = b'{"status":"success","datos":[]}'
+            else:
+                status = 404
+                body = b'{}'
+
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        settings = Settings(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            app_id="ficticio",
+            app_key="ficticia",
+            resource="ficticio",
+            api_version="1",
+        )
+        with (
+            patch("src.daily.load_settings", return_value=settings),
+            patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+            patch("src.daily.is_processed") as check,
+            patch("src.daily.persist_day") as persist,
+        ):
+            assert main(dry_run=True) == 0
+        assert Handler.auth_requests == 2
+        assert Handler.api_requests == 2
+        check.assert_not_called()
+        persist.assert_not_called()
+        mocked_daily_lock.assert_not_called()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
