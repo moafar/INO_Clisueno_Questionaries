@@ -155,6 +155,13 @@ def record_failure(
     }
     if category not in categories:
         raise AuditError("Categoría de fallo no permitida")
+
+    # El índice único de Labfp abarca tabla, fechas y source_file_hash.
+    # Cada intento fallido necesita un valor propio, incluso si la API no
+    # respondió o se repite exactamente el mismo contenido.
+    # En ejecuciones success se conserva el SHA-256 puro.
+    attempt_hash = f"failed:{load_id}:{source_hash}"
+
     try:
         with (
             psycopg.connect(database_url) as conn,
@@ -175,7 +182,7 @@ def record_failure(
                 """,
                 (
                     load_id, PIPELINE, TARGET_SCHEMA, TARGET_TABLE,
-                    SOURCE_SYSTEM, day, day, SOURCE_FILE, source_hash,
+                    SOURCE_SYSTEM, day, day, SOURCE_FILE, attempt_hash,
                     rows_read, started_at, datetime.now(UTC), category,
                 ),
             )
