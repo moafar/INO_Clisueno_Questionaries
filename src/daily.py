@@ -22,7 +22,7 @@ from src.config import load_settings
 from src.dates import previous_day
 from src.schema import compare_schema, load_reference
 from src.storage import StorageError
-from src.validation import QuestionnaireValidationError, validate_questionnaires
+from src.validation import validate_questionnaires
 
 
 class JsonFormatter(logging.Formatter):
