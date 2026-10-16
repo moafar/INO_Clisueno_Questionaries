@@ -135,7 +135,7 @@ def test_fallo_registra_codigo_seguro_en_audit_load_control():
     sql, params = cur.execute.call_args.args
     assert "'failed'" in sql
     assert params[0] == "run-2"
-    assert NO_HASH in params
+    assert params[8] == f"failed:run-2:{NO_HASH}"
     assert params[-1] == "API_ERROR"
 
 
@@ -143,3 +143,36 @@ def test_fallo_rechaza_mensajes_no_permitidos():
     with patch("src.audit.psycopg.connect") as connect, pytest.raises(AuditError):
         record_failure(DB, DAY, STARTED, "run-3", "texto clínico libre")
     connect.assert_not_called()
+
+
+def test_fallos_repetidos_misma_fecha_y_hash_tienen_valores_unicos():
+    """El índice único no debe bloquear intentos fallidos repetidos."""
+    hashes = []
+    for load_id in ("run-3", "run-4"):
+        conn, cur = fake_connection()
+        with patch("src.audit.psycopg.connect", return_value=conn):
+            record_failure(
+                DB, DAY, STARTED, load_id, "STORAGE_ERROR",
+                rows_read=2, source_hash="a" * 64,
+            )
+        hashes.append(cur.execute.call_args.args[1][8])
+
+    assert hashes == [
+        "failed:run-3:" + "a" * 64,
+        "failed:run-4:" + "a" * 64,
+    ]
+    assert hashes[0] != hashes[1]
+
+
+def test_fallos_sin_respuesta_tambien_tienen_valores_unicos():
+    hashes = []
+    for load_id in ("run-5", "run-6"):
+        conn, cur = fake_connection()
+        with patch("src.audit.psycopg.connect", return_value=conn):
+            record_failure(DB, DAY, STARTED, load_id, "API_ERROR")
+        hashes.append(cur.execute.call_args.args[1][8])
+
+    assert hashes == [
+        "failed:run-5:not_available",
+        "failed:run-6:not_available",
+    ]
