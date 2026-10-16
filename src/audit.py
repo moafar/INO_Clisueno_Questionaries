@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import psycopg
 
-from src.storage import StorageError, store_questionnaires_in_transaction
+from src.storage import store_questionnaires_in_transaction
 
 PIPELINE = "clisueno_questionaries_daily"
 TARGET_SCHEMA = "staging"
