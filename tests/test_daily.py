@@ -900,10 +900,12 @@ def test_http_local_401_token_renovado_y_consulta_repetida_sin_postgres(
                 if self.headers.get("Authorization") == "Bearer token-1":
                     status = 401
                     body = b'{"status":"unauthorized"}'
-                else:
-                    assert self.headers.get("Authorization") == "Bearer token-2"
+                elif self.headers.get("Authorization") == "Bearer token-2":
                     status = 200
                     body = b'{"status":"success","datos":[]}'
+                else:
+                    status = 403
+                    body = b'{"status":"forbidden"}'
             else:
                 status = 404
                 body = b'{}'
