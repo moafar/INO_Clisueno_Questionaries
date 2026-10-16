@@ -8,9 +8,9 @@
 
 **Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
 
-**Pruebas:** 134 superadas en WSL (5,53 s), Ruff sin errores (16-oct-2026). PostgreSQL local: recuperación simulada, bloqueos global y por fecha, coexistencia y liberación de bloqueos validados sin escrituras.
+**Pruebas:** 141 superadas en WSL (5,87 s) y Ruff sin errores (16-oct-2026). PostgreSQL local: rollback y reanudación con datos ficticios, bloques de concurrencia global/diario y prueba de dos procesos con API simulada superadas; tablas verificadas vacías.
 
-**Prioridad actual:** validar en WSL el mecanismo nuevo de renovación del Bearer Token tras HTTP 401, con un solo reintento y sin reintentar HTTP 403; después revisar errores HTTP, protección de secretos y observabilidad antes de autorizar cargas clínicas o activar `systemd`.
+**Prioridad actual:** revisar manejo de errores HTTP recuperables/permanentes y protección de credenciales y logs; luego observabilidad, alertas y despliegue antes de autorizar cargas clínicas o activar `systemd`. La renovación por HTTP 401 ya está validada.
 
 La extracción histórica queda aplazada.
 
@@ -120,12 +120,12 @@ cuando la API responde de manera válida.
 
 ## 3. Prioridad alta — Seguridad y resiliencia
 
-- [ ] Validar en WSL la renovación controlada del Bearer Token al recibir HTTP 401 en la extracción: código implementado, segundo token y única repetición de consulta; segundo 401 y fallo de renovación detienen el proceso con `AUTH_ERROR`. HTTP 403 no renueva y detiene con `API_ERROR`. Pruebas con mocks y servidor HTTP local añadidas, aún no ejecutadas.
+- [x] Validar en WSL la renovación controlada del Bearer Token ante HTTP 401: token nuevo y una sola repetición de consulta; segundo 401 o fallo de renovación detiene la fecha con `AUTH_ERROR`. HTTP 403 no renueva y detiene con `API_ERROR`. Suite de 141 pruebas superada, incluyendo mocks e integración con servidor HTTP local; Ruff sin errores.
 - [ ] Diferenciar errores recuperables y permanentes.
 - [ ] Revisar los límites de reintentos y tiempos de espera.
 - [ ] Evitar reintentos indefinidos.
 - [x] Validar bloqueos global y diario, con pruebas automatizadas y pruebas reales de adquisición, contención y liberación en PostgreSQL local.
-- [ ] Validar extremo a extremo con dos procesos y API simulada que la contención diaria impide llamadas redundantes.
+- [x] Validar con dos procesos Python independientes y API simulada que la contención diaria impide llamadas redundantes antes de extraer; PostgreSQL local real, sin escrituras.
 - [ ] Garantizar que los logs no contienen datos clínicos.
 - [ ] Garantizar que las excepciones no exponen credenciales.
 - [ ] Revisar tratamiento de respuestas JSON inesperadas.
@@ -246,12 +246,14 @@ La carga histórica no forma parte del alcance inmediato.
 - **Bloqueo de recuperación validado:** `exclusive_recovery()` obtiene `pg_try_advisory_lock` de sesión con clave reservada `(LOCK_NAMESPACE, 0)` y mantiene su conexión durante la selección y procesamiento de todos los días. En PostgreSQL local, una segunda recuperación simultánea fue rechazada y, tras cerrar la primera, se pudo adquirir el bloqueo nuevamente. La conexión se cierra al finalizar o fallar; sigue existiendo bloqueo transaccional por día para otras modalidades.
 - **Validación más reciente:** 127 pruebas aprobadas en 5,43 s, Ruff sin errores y prueba de bloqueo de sesión sobre PostgreSQL local superada. Ajustes de estilo en `tests/test_audit.py` guardados y publicados en commit `7b5f9dc`.
 - **Interrupción abrupta probada:** un proceso auxiliar adquirió `exclusive_recovery()`, la segunda conexión fue rechazada, el proceso auxiliar terminó con `SIGKILL` y un nuevo intento adquirió el bloqueo liberado. Prueba sin consultas MediCloud ni escrituras SQL. Esto verifica liberación de bloqueo, no rollback de una transacción de persistencia interrumpida.
-- **Concurrencia mixta identificada:** el bloqueo global `(LOCK_NAMESPACE, 0)` y el transaccional diario `(LOCK_NAMESPACE, ordinal)` pueden coexistir; no bastan para evitar dos consultas MediCloud antes de la escritura. Implementado `exclusive_day()` con bloqueo de sesión `(LOCK_NAMESPACE, -ordinal)` adquirido antes de `is_processed` y la autenticación y mantenido durante extracción, persistencia y auditoría del fallo. Si la fecha está ocupada, se rechaza sin consulta API ni registro `failed`. Pendiente validar la implementación recién publicada.
+- **Concurrencia mixta identificada:** el bloqueo global `(LOCK_NAMESPACE, 0)` y el transaccional diario `(LOCK_NAMESPACE, ordinal)` pueden coexistir; no bastan para evitar dos consultas MediCloud antes de la escritura. Implementado `exclusive_day()` con bloqueo de sesión `(LOCK_NAMESPACE, -ordinal)` adquirido antes de `is_processed` y la autenticación y mantenido durante extracción, persistencia y auditoría del fallo. Si la fecha está ocupada, se rechaza sin consulta API ni registro `failed`. Validado con 134 pruebas anteriores y comprobación posterior de dos procesos independientes con API simulada.
 - **Última validación completada:** 134 pruebas en 5,53 s y Ruff sin errores. En PostgreSQL local, `exclusive_day()` rechaza una segunda conexión para la misma fecha y permite otra fecha; `exclusive_recovery()` y `exclusive_day()` coexisten y la fecha vuelve a estar disponible tras liberación. Sin consultas MediCloud ni escrituras.
 - **Rollback y reanudación transaccional confirmados:** un proceso auxiliar insertó un cuestionario ficticio y un `success` de auditoría en la misma transacción sin `COMMIT`; tras `SIGKILL` ambas inserciones se revirtieron (0 filas) y se liberó el bloqueo. `persist_day()` confirmó después el mismo día (1 cuestionario y 1 auditoría); al repetir, devolvió `already_processed` y 0 nuevos. Se eliminaron ambos registros de prueba. Esto verifica la capa transaccional; no constituye una prueba extremo a extremo del CLI ni de MediCloud.
 - **Prueba de concurrencia con dos procesos reales completada:** `main()` del primer proceso mantuvo `exclusive_day()` durante una API simulada pausada; el segundo `main()` devolvió 1 sin entrar en la API. El primero terminó con 0; ambas tablas permanecieron vacías. Se usó PostgreSQL local real con mocks de MediCloud y persistencia. Sin escrituras ni acceso a producción.
-- **Renovación controlada incorporada (pendiente de validación WSL):** `src.client` distingue HTTP 401 mediante `MedicloudUnauthorizedError`. `src.daily.main()` adquiere un nuevo token y repite una única vez la solicitud, sin bucles; registra `AUTH_ERROR` si falla la renovación o persiste el 401. HTTP 403 y otros errores API no renuevan token. Se añadieron pruebas unitarias y una integración con servidor HTTP local sin PostgreSQL ni MediCloud.
-- **Pendientes prioritarios:** ejecutar Ruff y pytest en WSL; revisar otros fallos HTTP, protección de secretos, alertas y despliegue autónomo.
+- **Renovación controlada validada en WSL:** `src.client` distingue HTTP 401 mediante `MedicloudUnauthorizedError`. `src.daily.main()` adquiere un nuevo token y repite una única vez la solicitud, sin bucles; registra `AUTH_ERROR` si falla la renovación o persiste el 401. HTTP 403 y otros errores API no renuevan token. Pruebas unitarias y con servidor HTTP local aprobadas sin PostgreSQL ni MediCloud.
+- **Última validación WSL (16-oct-2026):** Ruff sin errores tras corrección `UP031` en `tests/test_daily.py`; `python -m pytest tests/ -q`: **141 passed in 5.87s**. Corrección de estilo publicada en GitHub, commit `d7a3c66`, rama `feature/postgresql-storage`.
+- **Pendientes prioritarios:** revisar otros fallos HTTP, límites de reintentos, protección de secretos y logs, alertas y despliegue autónomo. La API real y la persistencia clínica siguen sin ejecutarse con esta nueva lógica.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** sincronizar la rama en WSL y ejecutar Ruff y pytest para validar la renovación de token; no consultar MediCloud ni persistir datos clínicos.
+- **Punto seguro de suspensión:** actualización de este TODO en remoto; realizar `git pull --ff-only origin feature/postgresql-storage` y comprobar `git status --short --branch` limpio antes de suspender.
+- **Al retomar:** revisar el tratamiento de errores HTTP recuperables/permanentes y la protección de secretos sin consultar MediCloud ni cargar datos clínicos.
