@@ -10,7 +10,7 @@
 
 **Pruebas:** 84 superadas en WSL (5,24 s) y Ruff sin errores (16-oct-2026). Pruebas de integración PostgreSQL local superadas; limpieza verificada.
 
-**Prioridad actual:** validar en WSL la ejecución manual por intervalo inclusivo, antes de implementar detección y recuperación automática de días pendientes con fecha inicial configurable.
+**Prioridad actual:** diseñar la detección y recuperación automática de días pendientes, con fecha inicial configurable y controles para evitar cargas históricas involuntarias.
 
 La extracción histórica queda aplazada.
 
@@ -47,7 +47,7 @@ La extracción histórica queda aplazada.
 - [x] Evitar exposición de información sensible en logs.
 - [x] Crear pruebas automatizadas del proceso diario.
 - [x] Implementar `--date` y validar extracción real `2026-10-10` en `--dry-run` (57 cuestionarios; 0 escrituras confirmadas).
-- [ ] Validar en WSL la nueva opción `--start-date`/`--end-date` y sus pruebas unitarias.
+- [x] Validar `--start-date`/`--end-date` en WSL: 103 pruebas superadas, Ruff sin errores y `--dry-run` real para 2026-10-09 y 2026-10-10 (58 + 57 registros); PostgreSQL local quedó vacío.
 
 **Criterio de aceptación:**
 
@@ -231,8 +231,9 @@ La carga histórica no forma parte del alcance inmediato.
 - `source_file_hash`: en `success`, SHA-256 del lote JSON ordenado por `id`; en `failed`, `failed:<load_id>:<SHA-256|not_available>` para permitir reintentos sin cambiar el índice único compartido.
 - `--dry-run` real anterior: 2026-10-15, 59 registros validados, sin escritura en PostgreSQL.
 - Ejecución manual `--date 2026-10-10 --dry-run` probada contra MediCloud: 57 cuestionarios; tablas locales verificadas vacías.
-- **Nuevo en GitHub, pendiente de validación local:** ejecución de intervalo manual inclusivo mediante `--start-date` y `--end-date`, un día por transacción, deteniendo el intervalo al primer error; pruebas de CLI y fechas añadidas.
-- Pendientes prioritarios: validar intervalo manual en WSL; después **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción y despliegue autónomo.
+- **Intervalo manual validado:** `--start-date`/`--end-date` procesa día a día en orden cronológico y detiene la secuencia ante el primer error; 103 pruebas superadas (5,29 s), Ruff sin errores y consulta real `--dry-run` de 2026-10-09 (58) y 2026-10-10 (57), total 115 cuestionarios.
+- **Comprobación posterior a `--dry-run`:** ambas tablas locales `staging.clisueno_questionaries` y `audit.load_control` con 0 registros.
+- Pendientes prioritarios: **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso inmediato:** `git pull --ff-only origin feature/postgresql-storage`, Ruff y pytest; posteriormente probar un intervalo manual con `--dry-run` y comprobar que no hubo escrituras.
+- **Próximo paso:** definir el alcance temporal y comportamiento ante fallos de la recuperación automática; implementar y probar con mocks antes de cualquier escritura clínica.
