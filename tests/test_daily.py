@@ -2,13 +2,13 @@
 
 import argparse
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
-from src.daily import main, parse_iso_date
+from src.daily import cli, main, parse_iso_date, run_date_range
 from src.validation import QuestionnaireValidationError
 
 
@@ -317,3 +317,92 @@ def test_fecha_manual_rechaza_hoy_y_futuro_sin_consultar_api():
     api.assert_not_called()
     check.assert_not_called()
     failure.assert_not_called()
+
+
+def test_intervalo_manual_procesa_dias_consecutivos_inclusivos():
+    with (
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.main", return_value=0) as process,
+    ):
+        assert run_date_range(
+            date(2026, 10, 1), date(2026, 10, 3), dry_run=True
+        ) == 0
+    assert process.call_args_list == [
+        call(dry_run=True, target_date=date(2026, 10, 1)),
+        call(dry_run=True, target_date=date(2026, 10, 2)),
+        call(dry_run=True, target_date=date(2026, 10, 3)),
+    ]
+
+
+def test_intervalo_detiene_siguientes_dias_si_un_dia_falla():
+    with (
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.main", side_effect=[0, 1, 0]) as process,
+    ):
+        assert run_date_range(
+            date(2026, 10, 1), date(2026, 10, 3)
+        ) == 1
+    assert process.call_count == 2
+    assert process.call_args_list[-1] == call(
+        dry_run=False, target_date=date(2026, 10, 2)
+    )
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        (date(2026, 10, 3), date(2026, 10, 2)),
+        (date(2026, 10, 1), date(2026, 10, 16)),
+    ],
+)
+def test_intervalo_invalido_no_ejecuta_ningun_dia(start, end):
+    with (
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.main") as process,
+    ):
+        assert run_date_range(start, end, dry_run=True) == 1
+    process.assert_not_called()
+
+
+def test_cli_encamina_intervalo_a_procesamiento_diario():
+    start, end = date(2026, 10, 1), date(2026, 10, 3)
+    with patch("src.daily.run_date_range", return_value=0) as run:
+        assert cli([
+            "--start-date", start.isoformat(),
+            "--end-date", end.isoformat(), "--dry-run",
+        ]) == 0
+    run.assert_called_once_with(start, end, dry_run=True)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--start-date", "2026-10-01"],
+        ["--end-date", "2026-10-03"],
+        ["--date", "2026-10-02", "--start-date", "2026-10-01"],
+        ["--date", "2026-10-02", "--end-date", "2026-10-03"],
+    ],
+)
+def test_cli_rechaza_intervalos_incompletos_y_combinaciones(args):
+    with (
+        patch("src.daily.main") as process,
+        patch("src.daily.run_date_range") as run,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli(args)
+    assert exc.value.code == 2
+    process.assert_not_called()
+    run.assert_not_called()
+
+
+def test_cli_mantiene_opcion_manual_fecha_individual():
+    day = date(2026, 10, 10)
+    with patch("src.daily.main", return_value=0) as process:
+        assert cli(["--date", day.isoformat(), "--dry-run"]) == 0
+    process.assert_called_once_with(dry_run=True, target_date=day)
+
+
+def test_cli_mantiene_opcion_diaria_por_defecto():
+    with patch("src.daily.main", return_value=0) as process:
+        assert cli([]) == 0
+    process.assert_called_once_with(dry_run=False, target_date=None)
