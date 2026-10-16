@@ -10,7 +10,7 @@
 
 **Pruebas:** 127 superadas en WSL (5,43 s), Ruff sin errores (16-oct-2026). PostgreSQL local: selección de pendientes, recuperación simulada tras fallo, bloqueo exclusivo de sesión y limpieza verificados.
 
-**Prioridad actual:** comprobar interrupciones abruptas y concurrencia mixta (recuperación con ejecución manual/diaria), después revisar seguridad y observabilidad antes de autorizar cargas clínicas o activar `systemd`.
+**Prioridad actual:** validar el nuevo bloqueo exclusivo por fecha en WSL y PostgreSQL local para evitar consultas MediCloud redundantes entre `--recover` y ejecuciones manuales/diarias. Después revisar rollback ante terminación abrupta, seguridad y observabilidad antes de autorizar cargas clínicas o activar `systemd`.
 
 La extracción histórica queda aplazada.
 
@@ -107,7 +107,7 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Validar en WSL y PostgreSQL local el bloqueo exclusivo de sesión para recuperaciones simultáneas: segunda ejecución rechazada y nueva ejecución admitida tras liberar el bloqueo; 127 pruebas automatizadas y Ruff superados.
 - [x] Comprobar con PostgreSQL local que un bloqueo exclusivo de sesión se libera tras `SIGKILL` del proceso auxiliar y puede adquirirse de nuevo sin intervención humana.
 - [ ] Probar la recuperación tras interrupción durante una transacción de escritura (rollback y posterior reanudación).
-- [ ] Probar concurrencia mixta entre `--recover` y ejecuciones manuales/diarias.
+- [ ] Validar en WSL y PostgreSQL local el bloqueo de sesión por fecha, incorporado antes de comprobar auditoría y llamar a MediCloud en ejecuciones normales, manuales y `--recover`; mantiene bloqueos transaccionales para escritura. El modo `--dry-run` no accede a PostgreSQL y permanece sin bloqueo.
 
 **Criterio de aceptación:**
 
@@ -123,7 +123,7 @@ cuando la API responde de manera válida.
 - [ ] Diferenciar errores recuperables y permanentes.
 - [ ] Revisar los límites de reintentos y tiempos de espera.
 - [ ] Evitar reintentos indefinidos.
-- [ ] Impedir ejecuciones concurrentes.
+- [ ] Validar la protección completa frente a ejecuciones concurrentes mixtas; bloqueo global de `--recover` y bloqueo de sesión diario ya implementados, este último pendiente de pruebas WSL/PostgreSQL local.
 - [ ] Garantizar que los logs no contienen datos clínicos.
 - [ ] Garantizar que las excepciones no exponen credenciales.
 - [ ] Revisar tratamiento de respuestas JSON inesperadas.
@@ -244,7 +244,9 @@ La carga histórica no forma parte del alcance inmediato.
 - **Bloqueo de recuperación validado:** `exclusive_recovery()` obtiene `pg_try_advisory_lock` de sesión con clave reservada `(LOCK_NAMESPACE, 0)` y mantiene su conexión durante la selección y procesamiento de todos los días. En PostgreSQL local, una segunda recuperación simultánea fue rechazada y, tras cerrar la primera, se pudo adquirir el bloqueo nuevamente. La conexión se cierra al finalizar o fallar; sigue existiendo bloqueo transaccional por día para otras modalidades.
 - **Validación más reciente:** 127 pruebas aprobadas en 5,43 s, Ruff sin errores y prueba de bloqueo de sesión sobre PostgreSQL local superada. Ajustes de estilo en `tests/test_audit.py` guardados y publicados en commit `7b5f9dc`.
 - **Interrupción abrupta probada:** un proceso auxiliar adquirió `exclusive_recovery()`, la segunda conexión fue rechazada, el proceso auxiliar terminó con `SIGKILL` y un nuevo intento adquirió el bloqueo liberado. Prueba sin consultas MediCloud ni escrituras SQL. Esto verifica liberación de bloqueo, no rollback de una transacción de persistencia interrumpida.
-- **Pendientes prioritarios:** concurrencia mixta, rollback tras interrupción de una escritura, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
+- **Concurrencia mixta identificada:** el bloqueo global `(LOCK_NAMESPACE, 0)` y el transaccional diario `(LOCK_NAMESPACE, ordinal)` pueden coexistir; no bastan para evitar dos consultas MediCloud antes de la escritura. Implementado `exclusive_day()` con bloqueo de sesión `(LOCK_NAMESPACE, -ordinal)` adquirido antes de `is_processed` y la autenticación y mantenido durante extracción, persistencia y auditoría del fallo. Si la fecha está ocupada, se rechaza sin consulta API ni registro `failed`. Pendiente validar la implementación recién publicada.
+- **Última validación completada:** 127 pruebas y Ruff sin errores, anteriores al nuevo bloqueo por fecha.
+- **Pendientes prioritarios:** Ruff/pytest en WSL y prueba real del nuevo bloqueo con PostgreSQL local; rollback tras interrupción de una escritura, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** sincronizar `TODO.md` en WSL y comprobar concurrencia mixta con procesos simulados, sin consultar MediCloud ni persistir datos clínicos.
+- **Próximo paso:** sincronizar código en WSL y ejecutar Ruff/pytest para validar el bloqueo de sesión por fecha; después probarlo sobre PostgreSQL local sin consultar MediCloud ni persistir datos clínicos.
