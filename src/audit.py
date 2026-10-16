@@ -85,6 +85,56 @@ def is_processed(database_url: str, day: date) -> bool:
         raise AuditError("Error consultando fechas procesadas") from exc
 
 
+def pending_days(
+    database_url: str,
+    first_day: date,
+    last_day: date,
+    *,
+    limit: int = 7,
+) -> list[date]:
+    """Lista las primeras fechas sin success del pipeline, en orden.
+
+    Consulta únicamente la auditoría compartida; no escribe en PostgreSQL.
+    Un día con fallo previo sigue pendiente, y un éxito con cero filas cuenta.
+    """
+    if first_day > last_day:
+        raise ValueError("Intervalo de recuperación invertido")
+    if limit < 1:
+        raise ValueError("El límite de recuperación debe ser positivo")
+    try:
+        with (
+            psycopg.connect(database_url) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute(
+                """
+                SELECT days.day::date
+                FROM generate_series(
+                    %s::timestamp, %s::timestamp, interval '1 day'
+                ) AS days(day)
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM audit.load_control AS audit
+                    WHERE audit.pipeline_name = %s
+                      AND audit.target_schema = %s
+                      AND audit.target_table = %s
+                      AND audit.source_start_date = days.day::date
+                      AND audit.source_end_date = days.day::date
+                      AND audit.status = 'success'
+                )
+                ORDER BY days.day
+                LIMIT %s
+                """,
+                (
+                    first_day, last_day, PIPELINE,
+                    TARGET_SCHEMA, TARGET_TABLE, limit,
+                ),
+            )
+            return [row[0] for row in cur.fetchall()]
+    except psycopg.Error as exc:
+        raise AuditError("Error consultando días pendientes") from exc
+
+
 def persist_day(
     database_url: str,
     day: date,
