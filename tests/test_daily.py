@@ -7,11 +7,18 @@ from unittest.mock import call, patch
 
 import pytest
 
-from src.audit import AuditError
+from src.audit import AuditError, ConcurrentExecutionError, DayResult
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
 from src.daily import cli, main, parse_iso_date, run_date_range, run_recovery
 from src.validation import QuestionnaireValidationError
+
+
+@pytest.fixture(autouse=True)
+def mocked_daily_lock():
+    """Las pruebas unitarias no establecen conexiones PostgreSQL."""
+    with patch("src.daily.exclusive_day") as lock:
+        yield lock
 
 
 @patch("src.daily.get_cuestionarios")
@@ -178,7 +185,7 @@ def test_modo_normal_persiste_y_audita():
     failed.assert_not_called()
 
 
-def test_modo_simulacion_nunca_accede_a_postgresql():
+def test_modo_simulacion_nunca_accede_a_postgresql(mocked_daily_lock):
     lote = [{"id": 1, "fecha": "2026-10-14"}]
     with (
         patch("src.daily.load_settings"),
@@ -193,6 +200,7 @@ def test_modo_simulacion_nunca_accede_a_postgresql():
     check.assert_not_called()
     persist.assert_not_called()
     failed.assert_not_called()
+    mocked_daily_lock.assert_not_called()
 
 
 @patch.dict("os.environ", {"DATABASE_URL": ""})
@@ -641,3 +649,109 @@ def test_recovery_libera_bloqueo_tras_fallo():
     ):
         assert run_recovery() == 1
     assert not state["held"]
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_bloqueo_diario_antes_de_consultar_api_y_hasta_commit(mocked_daily_lock):
+    status = {"locked": False}
+    events = []
+
+    @contextmanager
+    def locked(_database_url, day):
+        assert day == date(2026, 10, 14)
+        status["locked"] = True
+        events.append("lock")
+        try:
+            yield
+        finally:
+            status["locked"] = False
+            events.append("release")
+
+    def processed(*args):
+        assert status["locked"]
+        events.append("check")
+        return False
+
+    def authenticate(*args):
+        assert status["locked"]
+        events.append("auth")
+        return "ficticio"
+
+    def extract(*args, **kwargs):
+        assert status["locked"]
+        events.append("api")
+        return [{"id": 1, "fecha": "2026-10-14"}]
+
+    def persist(*args):
+        assert status["locked"]
+        events.append("commit")
+        return DayResult(inserted=1, already_processed=False)
+
+    mocked_daily_lock.side_effect = locked
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.is_processed", side_effect=processed),
+        patch("src.daily.get_access_token", side_effect=authenticate),
+        patch("src.daily.get_cuestionarios", side_effect=extract),
+        patch("src.daily.persist_day", side_effect=persist),
+    ):
+        assert main() == 0
+
+    assert events == ["lock", "check", "auth", "api", "commit", "release"]
+    assert not status["locked"]
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_dia_ocupado_no_consulta_medicloud_ni_registra_failed(
+    mocked_daily_lock,
+):
+    mocked_daily_lock.side_effect = ConcurrentExecutionError("detalle sensible")
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.is_processed") as check,
+        patch("src.daily.get_access_token") as auth,
+        patch("src.daily.get_cuestionarios") as api,
+        patch("src.daily.persist_day") as persist,
+        patch("src.daily.record_failure") as failure,
+    ):
+        assert main() == 1
+    check.assert_not_called()
+    auth.assert_not_called()
+    api.assert_not_called()
+    persist.assert_not_called()
+    failure.assert_not_called()
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_bloqueo_diario_cubre_registro_del_fallo(mocked_daily_lock):
+    status = {"locked": False}
+
+    @contextmanager
+    def locked(*args):
+        status["locked"] = True
+        try:
+            yield
+        finally:
+            status["locked"] = False
+
+    def failed(*args):
+        assert status["locked"]
+        assert args[4] == "API_ERROR"
+
+    mocked_daily_lock.side_effect = locked
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.is_processed", return_value=False),
+        patch("src.daily.get_access_token", return_value="ficticio"),
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=MedicloudAPIError("detalle confidencial"),
+        ),
+        patch("src.daily.record_failure", side_effect=failed) as audit,
+    ):
+        assert main() == 1
+    audit.assert_called_once()
+    assert not status["locked"]
