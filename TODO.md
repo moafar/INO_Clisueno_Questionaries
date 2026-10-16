@@ -8,9 +8,9 @@
 
 **Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
 
-**Pruebas:** 84 superadas en WSL (5,24 s) y Ruff sin errores (16-oct-2026). Pruebas de integración PostgreSQL local superadas; limpieza verificada.
+**Pruebas:** 103 superadas en WSL (5,29 s) y Ruff sin errores (16-oct-2026), antes de la nueva implementación de recuperación. Integraciones PostgreSQL local anteriores superadas; limpieza verificada.
 
-**Prioridad actual:** diseñar la detección y recuperación automática de días pendientes, con fecha inicial configurable y controles para evitar cargas históricas involuntarias.
+**Prioridad actual:** validar en WSL y PostgreSQL local la implementación de recuperación explícita `--recover`, antes de autorizar cargas reales o configurarla en `systemd`.
 
 La extracción histórica queda aplazada.
 
@@ -99,11 +99,11 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Adoptar `audit.load_control` como control de fechas por `pipeline_name`, día y estado `success`; réplica de su DDL e índices creada en PostgreSQL local, sin alterar producción.
 - [x] Registrar ejecuciones correctas y fallidas en `audit.load_control`; reintentos fallidos repetidos probados.
 - [x] Registrar cantidades recibidas y persistidas (`rows_read`, `rows_loaded`).
-- [ ] Implementar detección de días pendientes (distinta de la selección manual explícita de intervalos).
-- [ ] Recuperar automáticamente días no procesados.
+- [x] Implementar consulta de días sin `success` específico de Clisueno, acotada a 7 fechas por ejecución (pendiente de pruebas en WSL y PostgreSQL local).
+- [x] Implementar `--recover` explícito desde `CLISUENO_START_DATE` hasta ayer según `America/Bogota`, cronológico y con parada por fallo; requiere pruebas y configuración operativa para activarlo.
 - [x] Impedir marcar un día como completado antes del commit; rollback conjunto comprobado.
 - [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
-- [ ] Crear pruebas de interrupción y recuperación.
+- [ ] Validar en WSL las nuevas pruebas unitarias de recuperación y su consulta en PostgreSQL local; añadir integración de interrupción/reanudación con datos ficticios.
 
 **Criterio de aceptación:**
 
@@ -203,7 +203,7 @@ La carga histórica no forma parte del alcance inmediato.
 | Cuestionarios inmutables | Supuesto funcional |
 | Clave única de cuestionario | `id` asumido globalmente único; conflictos protegidos con SHA-256 |
 | Tabla PostgreSQL de destino | Creada y verificada en `obsino` local |
-| Control de días pendientes | `audit.load_control` definido; detección y recuperación histórica pendiente |
+| Control de días pendientes | `--recover` implementado en rama, pendiente de validación; activación futura mediante `systemd` |
 | Carga histórica | Aplazada |
 
 ## 8. Requisitos no negociables
@@ -233,7 +233,8 @@ La carga histórica no forma parte del alcance inmediato.
 - Ejecución manual `--date 2026-10-10 --dry-run` probada contra MediCloud: 57 cuestionarios; tablas locales verificadas vacías.
 - **Intervalo manual validado:** `--start-date`/`--end-date` procesa día a día en orden cronológico y detiene la secuencia ante el primer error; 103 pruebas superadas (5,29 s), Ruff sin errores y consulta real `--dry-run` de 2026-10-09 (58) y 2026-10-10 (57), total 115 cuestionarios.
 - **Comprobación posterior a `--dry-run`:** ambas tablas locales `staging.clisueno_questionaries` y `audit.load_control` con 0 registros.
-- Pendientes prioritarios: **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción y despliegue autónomo.
+- **Recuperación implementada sin activación:** `CLISUENO_START_DATE` obligatoria solo con `--recover`; selección sin `success`, máximo 7 días por ejecución y parada al primer fallo. `--recover --dry-run` se rechaza porque el `--dry-run` no debe acceder a PostgreSQL.
+- **Pendientes prioritarios:** ejecutar Ruff y suite pytest en WSL; comprobar SQL de selección de pendientes y reanudación sobre filas ficticias en PostgreSQL local; revisar recuperación frente a concurrencia, ampliar pruebas y preparar despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** definir el alcance temporal y comportamiento ante fallos de la recuperación automática; implementar y probar con mocks antes de cualquier escritura clínica.
+- **Próximo paso:** sincronizar `feature/postgresql-storage` en WSL, ejecutar Ruff y pytest. No ejecutar todavía `--recover` contra MediCloud ni persistir datos clínicos.
