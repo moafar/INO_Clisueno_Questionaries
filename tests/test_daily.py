@@ -25,7 +25,7 @@ def test_extraccion_correcta(
         {"id": 2, "fecha": "2026-10-14"},
     ]
 
-    assert main() == 0
+    assert main(dry_run=True) == 0
 
     mock_cuestionarios.assert_called_once_with(
         settings=mock_settings.return_value,
@@ -44,7 +44,7 @@ def test_error_autenticacion(
     mock_fecha.return_value = date(2026, 10, 14)
     mock_token.side_effect = MedicloudAuthError("Error de autenticación")
 
-    assert main() == 1
+    assert main(dry_run=True) == 1
 
 
 @patch("src.daily.get_cuestionarios")
@@ -58,14 +58,14 @@ def test_error_extraccion(
     mock_token.return_value = "token-ficticio"
     mock_cuestionarios.side_effect = MedicloudAPIError("Error API")
 
-    assert main() == 1
+    assert main(dry_run=True) == 1
 
 
 @patch("src.daily.load_settings")
 def test_error_configuracion(mock_settings):
     mock_settings.side_effect = ValueError("Configuración incompleta")
 
-    assert main() == 1
+    assert main(dry_run=True) == 1
 
 
 @patch("src.daily.get_cuestionarios")
@@ -79,7 +79,7 @@ def test_dia_sin_cuestionarios(
     mock_token.return_value = "token-ficticio"
     mock_cuestionarios.return_value = []
 
-    assert main() == 0
+    assert main(dry_run=True) == 0
 
 
 @pytest.mark.parametrize(
@@ -90,7 +90,7 @@ def test_errores_no_exponen_detalles_en_logs(exception, caplog):
     with patch("src.daily.load_settings"), \
          patch("src.daily.previous_day"), \
          patch("src.daily.get_access_token", side_effect=exception):
-        assert main() == 1
+        assert main(dry_run=True) == 1
 
     assert "Error" not in caplog.text
     assert "La extracción diaria ha fallado." in caplog.text
@@ -110,7 +110,7 @@ def test_diario_valida_lote_y_fecha(
     lote = [{"id": 1, "fecha": fecha.isoformat()}]
     mock_cuestionarios.return_value = lote
 
-    assert main() == 0
+    assert main(dry_run=True) == 0
     mock_validate.assert_called_once_with(lote, fecha, fecha)
 
 
@@ -129,7 +129,7 @@ def test_error_validacion_no_marca_exito(
         "contenido clínico confidencial"
     )
 
-    assert main() == 1
+    assert main(dry_run=True) == 1
     assert "contenido clínico confidencial" not in caplog.text
     assert "La extracción diaria ha fallado." in caplog.text
 
@@ -145,4 +145,66 @@ def test_lote_realmente_invalido_se_rechaza(
     mock_token.return_value = "token-ficticio"
     mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-13"}]
 
+    assert main(dry_run=True) == 1
+
+
+@patch("src.daily.store_questionnaires", return_value=2)
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token", return_value="token-ficticio")
+@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
+@patch("src.daily.load_settings")
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_modo_normal_persiste(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
+):
+    lote = [
+        {"id": 1, "fecha": "2026-10-14"},
+        {"id": 2, "fecha": "2026-10-14"},
+    ]
+    mock_cuestionarios.return_value = lote
+    assert main() == 0
+    mock_storage.assert_called_once_with("postgresql://ficticio", lote)
+
+
+@patch("src.daily.store_questionnaires")
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token", return_value="token-ficticio")
+@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
+@patch("src.daily.load_settings")
+def test_modo_simulacion_nunca_persiste(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
+):
+    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-14"}]
+    assert main(dry_run=True) == 0
+    mock_storage.assert_not_called()
+
+
+@patch("src.daily.store_questionnaires")
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token", return_value="token-ficticio")
+@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
+@patch("src.daily.load_settings")
+@patch.dict("os.environ", {"DATABASE_URL": ""})
+def test_modo_normal_rechaza_falta_conexion(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
+):
+    mock_cuestionarios.return_value = []
     assert main() == 1
+    mock_storage.assert_not_called()
+
+
+@patch("src.daily.store_questionnaires")
+@patch("src.daily.get_cuestionarios")
+@patch("src.daily.get_access_token", return_value="token-ficticio")
+@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
+@patch("src.daily.load_settings")
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_error_de_persistencia_no_marca_exito(
+    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage, caplog
+):
+    from src.storage import StorageConflictError
+
+    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-14"}]
+    mock_storage.side_effect = StorageConflictError("dato clínico confidencial")
+    assert main() == 1
+    assert "dato clínico confidencial" not in caplog.text
