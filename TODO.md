@@ -4,13 +4,13 @@
 
 **Proyecto:** extractor desatendido de cuestionarios de sueño MediCloud.
 
-**Estado:** desarrollo local en WSL; persistencia transaccional verificada con datos ficticios, auditoría compartida en implementación y pendiente de pruebas locales.
+**Estado:** desarrollo local en WSL; persistencia y auditoría transaccional verificadas con datos ficticios en PostgreSQL local. No se han cargado cuestionarios clínicos.
 
 **Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
 
-**Pruebas:** última ejecución confirmada en WSL: 82 superadas y Ruff sin errores (16-oct-2026). Las dos pruebas nuevas de unicidad de fallos todavía no se han ejecutado en WSL.
+**Pruebas:** 84 superadas en WSL (5,24 s) y Ruff sin errores (16-oct-2026). Pruebas de integración PostgreSQL local superadas; limpieza verificada.
 
-**Prioridad actual:** validar el control de ejecuciones en `audit.load_control` y su transacción compartida con la persistencia.
+**Prioridad actual:** definir e implementar detección y recuperación automática de días pendientes, con una fecha inicial de operación configurable y sin activar todavía la carga histórica.
 
 La extracción histórica queda aplazada.
 
@@ -81,9 +81,9 @@ silenciosamente como cargas satisfactorias.
 - [x] Crear `sql/001_create_clisueno_questionaries.sql`; DDL de tabla ejecutado y restricciones verificadas en `obsino` local (los COMMENT de la migración no se han confirmado como ejecutados).
 - [x] Comprobar conexión `psycopg` en WSL mediante `DATABASE_URL` a PostgreSQL local.
 - [x] Implementar inserciones idempotentes y validar dos ejecuciones con datos ficticios en PostgreSQL local.
-- [x] Incorporar transacciones y exponer almacenamiento reutilizable dentro de una transacción externa (este último refactor requiere pruebas).
+- [x] Incorporar transacciones y almacenamiento reutilizable dentro de transacción externa; validación conjunta con auditoría superada en PostgreSQL local.
 - [x] Verificar rollback ante conflicto de hash con datos ficticios en PostgreSQL local.
-- [x] Añadir pruebas de persistencia (8 superadas; pruebas adicionales de transacción externa pendientes de validar).
+- [x] Añadir pruebas de persistencia e integración; transacción conjunta y rollback confirmados en PostgreSQL local.
 
 **Criterio de aceptación:**
 
@@ -95,12 +95,12 @@ Se conservan múltiples cuestionarios del mismo paciente.
 ### 2.4. Control de ejecuciones y recuperación
 
 - [x] Adoptar `audit.load_control` como control de fechas por `pipeline_name`, día y estado `success`; réplica de su DDL e índices creada en PostgreSQL local, sin alterar producción.
-- [ ] Registrar ejecuciones correctas y fallidas.
-- [ ] Registrar cantidad de registros recibidos y persistidos.
+- [x] Registrar ejecuciones correctas y fallidas en `audit.load_control`; reintentos fallidos repetidos probados.
+- [x] Registrar cantidades recibidas y persistidas (`rows_read`, `rows_loaded`).
 - [ ] Implementar detección de días pendientes.
 - [ ] Recuperar automáticamente días no procesados.
-- [ ] Impedir marcar un día como completado antes del commit.
-- [ ] Definir tratamiento de días sin cuestionarios.
+- [x] Impedir marcar un día como completado antes del commit; rollback conjunto comprobado.
+- [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
 - [ ] Crear pruebas de interrupción y recuperación.
 
 **Criterio de aceptación:**
@@ -132,11 +132,11 @@ de forma controlada ante fallos persistentes y protege los secretos.
 
 - [x] Reutilizar la estructura de producción de `audit.load_control` (réplica local creada y cuatro índices confirmados).
 - [x] Decidir integración de Clisueno con `audit.load_control`, sin alterar los flujos de Labfp.
-- [ ] Registrar inicio y finalización de cada ejecución.
+- [x] Registrar `started_at` y `finished_at` de los intentos auditados (`success` y `failed`).
 - [ ] Registrar duración y estado final.
-- [ ] Registrar cantidades de registros procesados.
-- [ ] Incorporar identificadores de ejecución.
-- [ ] Diferenciar errores de API, validación y PostgreSQL.
+- [x] Registrar cantidades leídas y cargadas en `audit.load_control`.
+- [x] Incorporar `load_id` UUID por intento.
+- [x] Diferenciar categorías de fallo para API, validación y PostgreSQL, sin volcar datos clínicos en la auditoría.
 - [ ] Definir alertas ante fallos persistentes.
 - [ ] Preparar integración con Metabase.
 
@@ -217,14 +217,17 @@ La carga histórica no forma parte del alcance inmediato.
 
 ## 9. Punto de control — 16-oct-2026
 
-- Rama `feature/postgresql-storage`: extracción diaria, modo `--dry-run`, persistencia idempotente y pruebas confirmadas antes del cambio de auditoría (68 tests; Ruff correcto).
-- Pruebas PostgreSQL local (datos ficticios): inserción, segunda ejecución sin duplicados y rollback ante conflicto, con limpieza confirmada. Tabla destino vacía al terminar.
-- `--dry-run` real: 2026-10-15, 59 registros validados; cero filas almacenadas.
-- Acuerdo: reutilizar `audit.load_control` para Clisueno, sin migraciones ni modificaciones de Labfp. Estados: `success` y `failed`.
-- `load_id`: UUID por intento; `source_file`: endpoint MediCloud; `source_file_hash`: SHA-256 del JSON ordenado por `id` en éxito; en fallos `failed:<UUID>:<SHA-256|not_available>` para respetar el índice único existente y registrar reintentos.
-- Nuevo código en rama: `src/audit.py`; `src/storage.py` refactorizado para transacción controlada por el llamante; `src/daily.py` persiste y registra `success` de forma atómica, y `failed` en transacción separada; `tests/test_audit.py` y pruebas ampliadas.
-- **Validación confirmada:** 82 tests y Ruff sin errores en WSL antes del ajuste del índice único; la nueva corrección y sus dos pruebas requieren validación en WSL y PostgreSQL local. No realizar cargas reales hasta validarlo.
-- El procesamiento sigue siendo solo del día anterior; recuperación automática de días pendientes y fecha inicial de operación configurable quedan pendientes.
-- `--dry-run` debe permanecer sin acceso a PostgreSQL.
-- La unicidad global de `id` se asume por decisión funcional y no ha sido demostrada externamente.
-- **Siguiente tarea:** sincronizar rama, ejecutar Ruff y suite completa (esperado 84 tests); verificar auditoría `success`/`failed` y rollback con registros ficticios en PostgreSQL local. No tocar producción.
+- Rama de desarrollo: `feature/postgresql-storage` (`main` sin integrar); no se ha tocado producción.
+- **Validación WSL:** 84 pruebas superadas en 5,24 s; Ruff sin errores.
+- **PostgreSQL local:** `obsino` en `127.0.0.1`; `staging.clisueno_questionaries` y réplica local de `audit.load_control` con clave primaria y tres índices verificados.
+- **Integraciones reales con datos ficticios, todas superadas:**
+  1. Lote vacío: auditoría `success` con `rows_read=0` y `rows_loaded=0`.
+  2. Dos intentos `failed` sobre el mismo día: ambos registrados sin conflicto de unicidad.
+  3. Inserción de cuestionario ficticio y auditoría `success` en una misma transacción.
+  4. Conflicto de `id` con contenido cambiado: rollback completo, sin inserción parcial ni `success` espurio.
+- **Limpieza final verificada:** `staging.clisueno_questionaries = 0` registros; `audit.load_control = 0` registros.
+- `source_file_hash`: en `success`, SHA-256 del lote JSON ordenado por `id`; en `failed`, `failed:<load_id>:<SHA-256|not_available>` para permitir reintentos sin cambiar el índice único compartido.
+- `--dry-run` real anterior: 2026-10-15, 59 registros validados, sin escritura en PostgreSQL.
+- Pendientes prioritarios: **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción; posteriormente revisar otros aspectos de resiliencia y preparar despliegue autónomo.
+- La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
+- No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
