@@ -6,6 +6,8 @@ Las escrituras de éxito se confirman junto con los cuestionarios.
 
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from uuid import uuid4
@@ -21,6 +23,7 @@ SOURCE_SYSTEM = "MediCloud"
 SOURCE_FILE = "/apisueno/getCuestionarioSueno"
 NO_HASH = "not_available"
 LOCK_NAMESPACE = 72482711
+RECOVERY_LOCK_KEY = 0  # Se distingue de los ordinales diarios (> 0).
 
 
 class AuditError(Exception):
@@ -133,6 +136,41 @@ def pending_days(
             return [row[0] for row in cur.fetchall()]
     except psycopg.Error as exc:
         raise AuditError("Error consultando días pendientes") from exc
+
+
+@contextmanager
+def exclusive_recovery(database_url: str) -> Iterator[None]:
+    """Impide recuperaciones simultáneas durante toda la consulta y extracción.
+
+    Usa un bloqueo de sesión, que permanece activo mientras se procesan los
+    días aunque cada día utilice otra conexión y transacción independientes.
+    PostgreSQL lo libera automáticamente si el proceso muere o se desconecta.
+    """
+    try:
+        conn = psycopg.connect(database_url, autocommit=True)
+    except psycopg.Error as exc:
+        raise AuditError("Error conectando al bloqueo de recuperación") from exc
+
+    try:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_try_advisory_lock(%s, %s)",
+                    (LOCK_NAMESPACE, RECOVERY_LOCK_KEY),
+                )
+                acquired = cur.fetchone()[0]
+        except psycopg.Error as exc:
+            raise AuditError("Error solicitando bloqueo de recuperación") from exc
+
+        if not acquired:
+            raise ConcurrentExecutionError(
+                "Otra recuperación de Clisueno está en ejecución"
+            )
+
+        yield
+    finally:
+        # Al cerrar la sesión se libera el bloqueo incluso si main() falla.
+        conn.close()
 
 
 def persist_day(
