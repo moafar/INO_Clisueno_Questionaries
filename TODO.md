@@ -4,14 +4,13 @@
 
 **Proyecto:** extractor desatendido de cuestionarios de sueño MediCloud.
 
-**Estado:** desarrollo local en WSL; tabla destino local creada, persistencia de la aplicación pendiente.
+**Estado:** desarrollo local en WSL; persistencia transaccional verificada con datos ficticios, auditoría compartida en implementación y pendiente de pruebas locales.
 
-**Rama Git:** `main`.
+**Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
 
-**Pruebas:** último resultado confirmado en WSL: 56 superadas y Ruff sin errores (15-oct-2026).
+**Pruebas:** último resultado confirmado en WSL antes de la auditoría: 68 superadas, Ruff sin errores y `--dry-run` real correcto (16-oct-2026). La ampliación de auditoría no se ha probado todavía en WSL.
 
-**Prioridad actual:** completar la extracción diaria y su persistencia
-segura en PostgreSQL.
+**Prioridad actual:** validar el control de ejecuciones en `audit.load_control` y su transacción compartida con la persistencia.
 
 La extracción histórica queda aplazada.
 
@@ -78,13 +77,13 @@ silenciosamente como cargas satisfactorias.
 
 - [x] Definir destino local `obsino.staging.clisueno_questionaries`.
 - [x] Definir tipos de datos y restricciones; estructura verificada en PostgreSQL local.
-- [ ] Determinar la clave única de cada cuestionario.
+- [x] Adoptar `id` como clave única global por decisión funcional; una colisión con hash diferente genera error y rollback.
 - [x] Crear `sql/001_create_clisueno_questionaries.sql`; DDL de tabla ejecutado y restricciones verificadas en `obsino` local (los COMMENT de la migración no se han confirmado como ejecutados).
-- [ ] Implementar conexión de producción del extractor mediante `psycopg` (`DATABASE_URL` local configurada y conexión manual Python comprobada).
-- [ ] Implementar inserciones idempotentes.
-- [ ] Incorporar transacciones.
-- [ ] Implementar rollback ante errores.
-- [ ] Crear pruebas de persistencia.
+- [x] Comprobar conexión `psycopg` en WSL mediante `DATABASE_URL` a PostgreSQL local.
+- [x] Implementar inserciones idempotentes y validar dos ejecuciones con datos ficticios en PostgreSQL local.
+- [x] Incorporar transacciones y exponer almacenamiento reutilizable dentro de una transacción externa (este último refactor requiere pruebas).
+- [x] Verificar rollback ante conflicto de hash con datos ficticios en PostgreSQL local.
+- [x] Añadir pruebas de persistencia (8 superadas; pruebas adicionales de transacción externa pendientes de validar).
 
 **Criterio de aceptación:**
 
@@ -95,7 +94,7 @@ Se conservan múltiples cuestionarios del mismo paciente.
 
 ### 2.4. Control de ejecuciones y recuperación
 
-- [ ] Definir tabla de control de fechas procesadas.
+- [x] Adoptar `audit.load_control` existente como control de fechas por `pipeline_name`, día y estado `success`; sin DDL adicional.
 - [ ] Registrar ejecuciones correctas y fallidas.
 - [ ] Registrar cantidad de registros recibidos y persistidos.
 - [ ] Implementar detección de días pendientes.
@@ -131,8 +130,8 @@ de forma controlada ante fallos persistentes y protege los secretos.
 
 ## 4. Prioridad media — Auditoría y observabilidad
 
-- [ ] Definir estructura de auditoría.
-- [ ] Evaluar integración con `audit.load_control`.
+- [x] Reutilizar la estructura existente de `audit.load_control` (sin cambios de esquema).
+- [x] Decidir integración de Clisueno con `audit.load_control`, sin alterar los flujos de Labfp.
 - [ ] Registrar inicio y finalización de cada ejecución.
 - [ ] Registrar duración y estado final.
 - [ ] Registrar cantidades de registros procesados.
@@ -192,7 +191,7 @@ La carga histórica no forma parte del alcance inmediato.
 | Desarrollo local en Ubuntu WSL | Confirmada |
 | Python 3.12 | Confirmada |
 | Repositorio Git independiente | Confirmada |
-| Desarrollo en rama `main` | Confirmada |
+| Desarrollo en rama `feature/postgresql-storage` | En curso, pendiente de integrar en `main` |
 | Servidor de ejecución `mineriaino` | Confirmada |
 | Ejecución sin supervisión | Confirmada |
 | Frecuencia diaria | Confirmada |
@@ -200,9 +199,9 @@ La carga histórica no forma parte del alcance inmediato.
 | Extracción del día anterior | Confirmada |
 | PostgreSQL como destino | Confirmada |
 | Cuestionarios inmutables | Supuesto funcional |
-| Clave única de cuestionario | Pendiente de validar |
+| Clave única de cuestionario | `id` asumido globalmente único; conflictos protegidos con SHA-256 |
 | Tabla PostgreSQL de destino | Creada y verificada en `obsino` local |
-| Control de días pendientes | Pendiente |
+| Control de días pendientes | `audit.load_control` definido; detección y recuperación histórica pendiente |
 | Carga histórica | Aplazada |
 
 ## 8. Requisitos no negociables
@@ -216,37 +215,16 @@ La carga histórica no forma parte del alcance inmediato.
 7. Mantener pruebas automatizadas para los componentes críticos.
 8. Documentar cambios operativos realizados en producción.
 
-## 9. Próxima tarea
+## 9. Punto de control — 16-oct-2026
 
-**Implementar persistencia PostgreSQL segura y pruebas, sin cargar todavía datos reales.**
-
-Verificado el 15-oct-2026 en WSL:
-- 49 pruebas automatizadas superadas y Ruff sin errores.
-- Ejecución real `python -m src.daily`: 59 cuestionarios de 2026-10-14
-  extraídos y validados; no almacenados en PostgreSQL.
-
-Pendientes inmediatos:
-- [x] Ejecutar Ruff y suite completa en WSL tras incorporar `src/schema.py` (56 pruebas superadas; última ejecución confirmada).
-- [x] Verificar ejecución real del detector de esquema (2026-10-14: 59 cuestionarios, sin aviso de deriva).
-- [x] Implementar comparación con los 179 nombres de referencia, sin rechazar automáticamente el lote (revisado con referencia versionada).
-- [ ] Confirmar semántica y unicidad global de `id` (solo se ha observado
-      unicidad por lote y estabilidad entre consultas).
-- [x] Preparar migración SQL y crear/verificar tabla en PostgreSQL local.
-- [ ] Implementar carga transaccional idempotente, control de hash y auditoría.
-- [ ] No considerar procesado un día antes del commit de persistencia.
-
-La estructura `CREATE TABLE` ya se ejecutó en PostgreSQL local. Los `COMMENT ON` de la migración no se han confirmado como ejecutados. La semántica global de `id` sigue pendiente de confirmación.
-
-La ejecución actual con código de salida 0 significa **extracción y validación**,
-no carga persistida ni día definitivamente procesado.
-
-## Punto seguro de suspensión — 15-oct-2026
-
-- Código remoto `main`: extracción, validación y detección de deriva funcionales; persistencia **no implementada**.
-- Conexión local comprobada desde Python mediante `DATABASE_URL` en `.env` (no versionar secretos). El proceso `src/daily.py` aún no utiliza esa variable.
-- `obsino.staging.clisueno_questionaries`: ocho columnas, cuatro restricciones verificadas; cero filas antes de cualquier carga.
-- Nombres originales confirmados en `schemas/cuestionarios_v1.json`: `tipoDocumento` -> `tipo_documento`, `Documento` -> `documento`, `Sede` -> `sede`; `id` y `fecha` conservan nombre.
-- La referencia versionada contiene nombres de 179 campos; no determina por sí sola los tipos ni la nulabilidad observados para estos tres campos. Revisar mapeo y reglas de null/vacío antes de insertar.
-- Siguiente tarea: diseñar e implementar `src/storage.py` con SHA-256 determinista, transacciones, idempotencia y rechazo seguro de conflictos; añadir pruebas y luego integrar en `src/daily.py`.
-- No ejecutar carga de datos reales ni dar por procesado un día hasta superar pruebas y validar rollback/commit.
-- Retomar desde este TODO: implementar `src/storage.py` y pruebas sin cambiar todavía el flujo diario; integrar y validar `src/daily.py` después.
+- Rama `feature/postgresql-storage`: extracción diaria, modo `--dry-run`, persistencia idempotente y pruebas confirmadas antes del cambio de auditoría (68 tests; Ruff correcto).
+- Pruebas PostgreSQL local (datos ficticios): inserción, segunda ejecución sin duplicados y rollback ante conflicto, con limpieza confirmada. Tabla destino vacía al terminar.
+- `--dry-run` real: 2026-10-15, 59 registros validados; cero filas almacenadas.
+- Acuerdo: reutilizar `audit.load_control` para Clisueno, sin migraciones ni modificaciones de Labfp. Estados: `success` y `failed`.
+- `load_id`: UUID por intento; `source_file`: endpoint MediCloud; `source_file_hash`: SHA-256 del JSON ordenado por `id`, o `not_available` si falla antes de tener contenido.
+- Nuevo código en rama: `src/audit.py`; `src/storage.py` refactorizado para transacción controlada por el llamante; `src/daily.py` persiste y registra `success` de forma atómica, y `failed` en transacción separada; `tests/test_audit.py` y pruebas ampliadas.
+- **Importante:** estos cambios de auditoría todavía NO han superado Ruff/pytest en WSL ni pruebas PostgreSQL local. No realizar cargas reales hasta validarlos.
+- El procesamiento sigue siendo solo del día anterior; recuperación automática de días pendientes y fecha inicial de operación configurable quedan pendientes.
+- `--dry-run` debe permanecer sin acceso a PostgreSQL.
+- La unicidad global de `id` se asume por decisión funcional y no ha sido demostrada externamente.
+- **Siguiente tarea:** sincronizar la rama en WSL y ejecutar Ruff y suite completa, corregir hallazgos antes de probar la transacción compartida con registros ficticios.
