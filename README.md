@@ -111,10 +111,10 @@ La persistencia y la auditoría están implementadas en la rama de desarrollo y 
 - `src/config.py`: configuración y credenciales desde variables de entorno.
 - `src/auth.py` y `src/client.py`: autenticación y consulta MediCloud.
 - `src/dates.py`: calendario `America/Bogota`.
-- `src/daily.py`: ejecución diaria, manual por fecha o intervalo.
+- `src/daily.py`: ejecución diaria, manual por fecha o intervalo y recuperación explícita de pendientes (en validación).
+- `src/audit.py`: selección de días sin `success`, auditoría y transacción compartida por día.
 - `src/validation.py` y `src/schema.py`: validación de respuestas y detección de cambios de esquema.
 - `src/storage.py`: persistencia idempotente con control de conflictos.
-- `src/audit.py`: auditoría y transacción compartida por día.
 - `tests/`: pruebas automatizadas.
 - `sql/`: definición de tablas de cuestionarios para el entorno local.
 - `TODO.md`: estado verificable y prioridades actuales.
@@ -154,6 +154,7 @@ Variables de MediCloud:
 Variable de persistencia requerida en ejecución normal:
 
 - `DATABASE_URL` (PostgreSQL; no se utiliza durante `--dry-run`).
+- `CLISUENO_START_DATE` (obligatoria únicamente con `--recover`; formato `YYYY-MM-DD`; determina el primer día que se puede recuperar).
 
 Las credenciales no deben incorporarse a Git, logs ni documentación.
 
@@ -182,18 +183,35 @@ python -m src.daily --start-date 2026-10-01 --end-date 2026-10-10 --dry-run
 python -m src.daily
 ```
 
-**Importante:** la modalidad por intervalos está implementada en la rama de desarrollo, pero todavía requiere validar Ruff, pytest y un intervalo real con `--dry-run` en WSL. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
+**Validación confirmada:** 103 pruebas superadas y Ruff sin errores. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
+
+**Importante:** la nueva recuperación `--recover` aún requiere pruebas de WSL e integración local. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
 
 Las fechas se expresan como `YYYY-MM-DD`. No se admiten días posteriores a ayer en `America/Bogota`. Para intervalos, se requieren ambas fechas y `--date` no se puede combinar con ellas.
 
 Cada fecha se consulta por separado, de modo que respeta el límite de la API de 10 días por petición. En modo normal, cada día confirma cuestionarios y auditoría en la misma transacción; los días con `success` anterior se omiten. Un fallo detiene el intervalo y no revierte las fechas ya confirmadas. En `--dry-run` no se consulta ni se modifica PostgreSQL.
+
+### 7.2. Recuperación explícita de días pendientes (pendiente de validación)
+
+La recuperación **no se activa por defecto**. Requiere definir una fecha inicial de operación en el `.env` local, por ejemplo `CLISUENO_START_DATE=AAAA-MM-DD` (sustituir por la fecha autorizada). No se incluye un valor predeterminado para impedir cargas históricas involuntarias.
+
+```bash
+# REQUIERE AUTORIZACIÓN Y VALIDACIÓN PREVIA; ESCRIBE DATOS EN POSTGRESQL
+python -m src.daily --recover
+```
+
+El modo `--recover` consulta `audit.load_control` para seleccionar, desde esa fecha hasta ayer en `America/Bogota`, únicamente los días sin `success` para el pipeline y tabla de Clisueno. Los `failed` no completan un día. Un día exitoso con cero cuestionarios sí cuenta como completado. Procesa por orden cronológico y como máximo **7 fechas pendientes por ejecución**. Una ejecución posterior continúa desde los días que sigan pendientes; un error detiene el lote, sin deshacer éxitos anteriores.
+
+Se reutiliza el mismo procesamiento diario para validación, idempotencia, bloqueo y transacción conjunta cuestionarios+auditoría. Las peticiones son de un solo día, dentro del límite de API.
+
+No se permite combinar `--recover` con `--date`, `--start-date`, `--end-date` ni `--dry-run`. Esto último mantiene la garantía de que `--dry-run` no accede a PostgreSQL: identificar pendientes requiere leer auditoría. **No ejecutar todavía el comando de recuperación contra datos clínicos**, hasta confirmar las pruebas pendientes y la fecha inicial autorizada.
 
 ### 7.2. Frecuencia automática prevista
 
 - Frecuencia: diaria, a las 03:00, `America/Bogota`.
 - Fecha por defecto: día calendario anterior.
 - Programación futura mediante `systemd timer`.
-- **Pendiente:** detección y recuperación automática de días sin `success`, a partir de una fecha inicial de operación configurable.
+- Implementación de recuperación explícita añadida a la rama de desarrollo, pendiente de pruebas WSL y PostgreSQL local; invocación por temporizador `systemd` todavía no implementada.
 
 ### 7.3. Requisitos operativos
 
@@ -249,9 +267,9 @@ Requisitos:
 
 ## 10. Limitaciones actuales
 
-- No hay recuperación automática de fechas pendientes ni fecha inicial configurable de operación.
+- La recuperación de fechas pendientes con `--recover` está implementada en la rama, pero todavía no se ha validado en WSL ni habilitado para operación.
 - No se ha configurado `systemd` ni desplegado el proyecto en `mineriaino`.
-- La ejecución manual por intervalos aún requiere validación en WSL.
+- La recuperación aún necesita pruebas específicas de lectura de auditoría y reanudación en PostgreSQL local.
 - Está pendiente el manejo integral de un token expirado durante una consulta y las alertas operativas.
 - El significado y unicidad global del campo `id` son supuestos funcionales aún no contrastados externamente.
 - La carga histórica automática no está implementada.
