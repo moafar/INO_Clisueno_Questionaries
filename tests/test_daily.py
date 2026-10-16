@@ -6,9 +6,9 @@ from unittest.mock import call, patch
 
 import pytest
 
+from src.audit import AuditError
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
-from src.audit import AuditError
 from src.daily import cli, main, parse_iso_date, run_date_range, run_recovery
 from src.validation import QuestionnaireValidationError
 
