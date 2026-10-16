@@ -10,6 +10,7 @@ from src.storage import (
     StorageError,
     content_hash,
     store_questionnaires,
+    store_questionnaires_in_transaction,
 )
 
 
@@ -150,3 +151,30 @@ def test_lote_vacio_no_inserta_registros():
     with patch("src.storage.psycopg.connect", return_value=conn):
         assert store_questionnaires("postgresql://ficticio", []) == 0
     assert conn.committed
+
+
+def test_shared_connection_keeps_commit_in_caller():
+    conn = FakeConnection()
+    with conn.transaction():
+        assert store_questionnaires_in_transaction(conn, [sample()]) == 1
+        assert not conn.committed
+        assert 1 not in conn.cur.rows
+    assert conn.committed
+    assert 1 in conn.cur.rows
+
+
+def test_shared_connection_rollback_is_owned_by_caller():
+    conn = FakeConnection()
+    with pytest.raises(RuntimeError, match="fallo simulado"), conn.transaction():
+        store_questionnaires_in_transaction(conn, [sample()])
+        raise RuntimeError("fallo simulado")
+    assert conn.rolled_back
+    assert conn.cur.rows == {}
+
+
+def test_shared_connection_conflict_rolls_back_earlier_insert():
+    conn = FakeConnection({2: content_hash(sample(2, "original"))})
+    with pytest.raises(StorageConflictError), conn.transaction():
+        store_questionnaires_in_transaction(conn, [sample(1), sample(2, "otro")])
+    assert conn.rolled_back
+    assert 1 not in conn.cur.rows
