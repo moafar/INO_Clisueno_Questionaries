@@ -10,7 +10,7 @@
 
 **Pruebas:** 120 superadas en WSL (5,47 s), Ruff sin errores (16-oct-2026). PostgreSQL local: selección de pendientes, recuperación simulada tras fallo y limpieza final verificadas.
 
-**Prioridad actual:** revisar salvaguardas pendientes (concurrencia, interrupciones abruptas, fallos de autenticación y observabilidad) antes de autorizar cargas clínicas o activar el temporizador `systemd`.
+**Prioridad actual:** validar en WSL y PostgreSQL local el bloqueo exclusivo durante todo `--recover`; posteriormente probar interrupciones abruptas, seguridad y observabilidad antes de autorizar cargas clínicas o temporizador `systemd`.
 
 La extracción histórica queda aplazada.
 
@@ -104,7 +104,8 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Impedir marcar un día como completado antes del commit; rollback conjunto comprobado.
 - [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
 - [x] Validar 120 pruebas en WSL y las consultas de recuperación en PostgreSQL local; simulación de interrupción por error y reanudación superada, con limpieza confirmada.
-- [ ] Probar interrupciones abruptas del proceso (kill/crash) y concurrencia de recuperaciones simultáneas.
+- [ ] Validar en WSL y PostgreSQL local el bloqueo exclusivo de sesión para recuperaciones simultáneas (implementado y con pruebas automatizadas añadidas).
+- [ ] Probar interrupciones abruptas del proceso (kill/crash) y concurrencia mixta con ejecuciones manuales/diarias.
 
 **Criterio de aceptación:**
 
@@ -238,7 +239,8 @@ La carga histórica no forma parte del alcance inmediato.
 - **Pruebas de recuperación confirmadas en WSL:** 120 passed (5,47 s); Ruff corregido y sin errores. Commit local de estilo `9e3a4d6`, publicado en GitHub.
 - **Integración PostgreSQL local:** selección del 1 y 2 de enero de 2000 con límite 2; un día `success` (0 filas) se excluye y los `failed` o sin registro quedan pendientes; simulación de recuperación de 3 días, con fallo en el segundo, reanudación en el segundo intento y sin duplicar el primero.
 - **Limpieza posterior confirmada:** `staging.clisueno_questionaries = 0` y `audit.load_control = 0`.
-- **Pendientes prioritarios:** revisar recuperación simultánea, interrupciones abruptas, renovación de credenciales y mecanismo de alertas antes de cargas reales y despliegue autónomo.
+- **Bloqueo de recuperación incorporado (pendiente de validación):** `exclusive_recovery()` obtiene `pg_try_advisory_lock` de sesión con clave reservada `(LOCK_NAMESPACE, 0)` y mantiene su conexión durante la selección y procesamiento de todos los días. Si hay otra recuperación activa, rechaza la segunda sin consultar MediCloud. La conexión se cierra al finalizar o fallar; sigue existiendo bloqueo transaccional por día para otras modalidades.
+- **Pendientes prioritarios:** sincronizar GitHub en WSL, Ruff/pytest y prueba local de colisión de bloqueos; interrupciones abruptas, concurrencia mixta, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** revisar y probar salvaguardas operativas restantes. No ejecutar todavía `--recover` contra MediCloud ni persistir datos clínicos.
+- **Próximo paso:** sincronizar GitHub en WSL, Ruff/pytest y verificar bloqueo de recuperación mediante dos conexiones locales. No ejecutar todavía `--recover` contra MediCloud ni persistir datos clínicos.
