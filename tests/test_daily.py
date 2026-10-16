@@ -9,7 +9,7 @@ import pytest
 
 from src.audit import AuditError, ConcurrentExecutionError, DayResult
 from src.auth import MedicloudAuthError
-from src.client import MedicloudAPIError
+from src.client import MedicloudAPIError, MedicloudUnauthorizedError
 from src.daily import cli, main, parse_iso_date, run_date_range, run_recovery
 from src.validation import QuestionnaireValidationError
 
@@ -755,3 +755,121 @@ def test_bloqueo_diario_cubre_registro_del_fallo(mocked_daily_lock):
         assert main() == 1
     audit.assert_called_once()
     assert not status["locked"]
+
+
+def test_401_refresca_token_y_repite_consulta_una_vez_en_dry_run(
+    mocked_daily_lock,
+):
+    day = date(2026, 10, 14)
+    records = [{"id": 1, "fecha": day.isoformat()}]
+    with (
+        patch("src.daily.load_settings") as settings,
+        patch("src.daily.previous_day", return_value=day),
+        patch(
+            "src.daily.get_access_token",
+            side_effect=["token-expirado", "token-renovado"],
+        ) as auth,
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=[
+                MedicloudUnauthorizedError("token inválido"),
+                records,
+            ],
+        ) as api,
+        patch("src.daily.persist_day") as persist,
+    ):
+        assert main(dry_run=True) == 0
+
+    assert auth.call_count == 2
+    assert api.call_count == 2
+    assert [call.kwargs["token"] for call in api.call_args_list] == [
+        "token-expirado", "token-renovado",
+    ]
+    assert all(call.kwargs["settings"] is settings.return_value
+               for call in api.call_args_list)
+    persist.assert_not_called()
+    mocked_daily_lock.assert_not_called()
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_401_persistente_detiene_tras_una_renovacion_y_audita_auth(caplog):
+    day = date(2026, 10, 14)
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=day),
+        patch("src.daily.is_processed", return_value=False),
+        patch(
+            "src.daily.get_access_token",
+            side_effect=["token-expirado", "token-renovado"],
+        ) as auth,
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=MedicloudUnauthorizedError("secreto-clinico"),
+        ) as api,
+        patch("src.daily.persist_day") as persist,
+        patch("src.daily.record_failure") as audit,
+    ):
+        assert main() == 1
+
+    assert auth.call_count == 2
+    assert api.call_count == 2
+    persist.assert_not_called()
+    audit.assert_called_once()
+    assert audit.call_args.args[4] == "AUTH_ERROR"
+    assert "secreto-clinico" not in caplog.text
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_401_con_renovacion_fallida_no_repite_la_api():
+    day = date(2026, 10, 14)
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=day),
+        patch("src.daily.is_processed", return_value=False),
+        patch(
+            "src.daily.get_access_token",
+            side_effect=[
+                "token-expirado",
+                MedicloudAuthError("credencial reservada"),
+            ],
+        ) as auth,
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=MedicloudUnauthorizedError("token caducado"),
+        ) as api,
+        patch("src.daily.persist_day") as persist,
+        patch("src.daily.record_failure") as audit,
+    ):
+        assert main() == 1
+
+    assert auth.call_count == 2
+    api.assert_called_once()
+    persist.assert_not_called()
+    audit.assert_called_once()
+    assert audit.call_args.args[4] == "AUTH_ERROR"
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_http_403_no_renueva_token():
+    day = date(2026, 10, 14)
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=day),
+        patch("src.daily.is_processed", return_value=False),
+        patch(
+            "src.daily.get_access_token", return_value="token-ficticio"
+        ) as auth,
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=MedicloudAPIError("rechazo permisos HTTP 403"),
+        ) as api,
+        patch("src.daily.persist_day") as persist,
+        patch("src.daily.record_failure") as audit,
+    ):
+        assert main() == 1
+
+    auth.assert_called_once()
+    api.assert_called_once()
+    persist.assert_not_called()
+    audit.assert_called_once()
+    assert audit.call_args.args[4] == "API_ERROR"
