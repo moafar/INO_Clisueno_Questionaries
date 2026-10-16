@@ -24,7 +24,11 @@ from src.audit import (
     record_failure,
 )
 from src.auth import MedicloudAuthError, get_access_token
-from src.client import MedicloudAPIError, get_cuestionarios
+from src.client import (
+    MedicloudAPIError,
+    MedicloudUnauthorizedError,
+    get_cuestionarios,
+)
 from src.config import load_settings
 from src.dates import previous_day
 from src.schema import compare_schema, load_reference
@@ -111,12 +115,26 @@ def main(dry_run: bool = False, *, target_date: date | None = None) -> int:
             category = "AUTH_ERROR"
             token = get_access_token(settings)
             category = "API_ERROR"
-            cuestionarios = get_cuestionarios(
-                settings=settings,
-                token=token,
-                fecha_inicial=fecha,
-                fecha_final=fecha,
-            )
+            try:
+                cuestionarios = get_cuestionarios(
+                    settings=settings,
+                    token=token,
+                    fecha_inicial=fecha,
+                    fecha_final=fecha,
+                )
+            except MedicloudUnauthorizedError:
+                logger.warning(
+                    "MediCloud devolvió HTTP 401; renovando token una sola vez."
+                )
+                category = "AUTH_ERROR"
+                token = get_access_token(settings)
+                category = "API_ERROR"
+                cuestionarios = get_cuestionarios(
+                    settings=settings,
+                    token=token,
+                    fecha_inicial=fecha,
+                    fecha_final=fecha,
+                )
             rows_read = len(cuestionarios)
 
             category = "VALIDATION_ERROR"
@@ -170,6 +188,8 @@ def main(dry_run: bool = False, *, target_date: date | None = None) -> int:
         ) as exc:
             if isinstance(exc, AuditError):
                 category = "AUDIT_ERROR"
+            elif isinstance(exc, MedicloudUnauthorizedError):
+                category = "AUTH_ERROR"
 
             if not dry_run and database_url and fecha is not None:
                 try:
