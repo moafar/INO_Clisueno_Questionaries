@@ -148,63 +148,116 @@ def test_lote_realmente_invalido_se_rechaza(
     assert main(dry_run=True) == 1
 
 
-@patch("src.daily.store_questionnaires", return_value=2)
-@patch("src.daily.get_cuestionarios")
-@patch("src.daily.get_access_token", return_value="token-ficticio")
-@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
-@patch("src.daily.load_settings")
 @patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
-def test_modo_normal_persiste(
-    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
-):
+def test_modo_normal_persiste_y_audita():
+    from src.audit import DayResult
+
     lote = [
         {"id": 1, "fecha": "2026-10-14"},
         {"id": 2, "fecha": "2026-10-14"},
     ]
-    mock_cuestionarios.return_value = lote
-    assert main() == 0
-    mock_storage.assert_called_once_with("postgresql://ficticio", lote)
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.get_access_token", return_value="token-ficticio"),
+        patch("src.daily.get_cuestionarios", return_value=lote),
+        patch("src.daily.is_processed", return_value=False),
+        patch(
+            "src.daily.persist_day",
+            return_value=DayResult(inserted=2, already_processed=False),
+        ) as persist,
+        patch("src.daily.record_failure") as failed,
+    ):
+        assert main() == 0
+    assert persist.call_args.args[0:3] == (
+        "postgresql://ficticio", date(2026, 10, 14), lote,
+    )
+    failed.assert_not_called()
 
 
-@patch("src.daily.store_questionnaires")
-@patch("src.daily.get_cuestionarios")
-@patch("src.daily.get_access_token", return_value="token-ficticio")
-@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
-@patch("src.daily.load_settings")
-def test_modo_simulacion_nunca_persiste(
-    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
-):
-    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-14"}]
-    assert main(dry_run=True) == 0
-    mock_storage.assert_not_called()
+def test_modo_simulacion_nunca_accede_a_postgresql():
+    lote = [{"id": 1, "fecha": "2026-10-14"}]
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.get_access_token", return_value="token-ficticio"),
+        patch("src.daily.get_cuestionarios", return_value=lote),
+        patch("src.daily.is_processed") as check,
+        patch("src.daily.persist_day") as persist,
+        patch("src.daily.record_failure") as failed,
+    ):
+        assert main(dry_run=True) == 0
+    check.assert_not_called()
+    persist.assert_not_called()
+    failed.assert_not_called()
 
 
-@patch("src.daily.store_questionnaires")
-@patch("src.daily.get_cuestionarios")
-@patch("src.daily.get_access_token", return_value="token-ficticio")
-@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
-@patch("src.daily.load_settings")
 @patch.dict("os.environ", {"DATABASE_URL": ""})
-def test_modo_normal_rechaza_falta_conexion(
-    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage
-):
-    mock_cuestionarios.return_value = []
-    assert main() == 1
-    mock_storage.assert_not_called()
+def test_modo_normal_rechaza_falta_conexion():
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.get_access_token") as auth,
+        patch("src.daily.persist_day") as persist,
+    ):
+        assert main() == 1
+    auth.assert_not_called()
+    persist.assert_not_called()
 
 
-@patch("src.daily.store_questionnaires")
-@patch("src.daily.get_cuestionarios")
-@patch("src.daily.get_access_token", return_value="token-ficticio")
-@patch("src.daily.previous_day", return_value=date(2026, 10, 14))
-@patch("src.daily.load_settings")
 @patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
-def test_error_de_persistencia_no_marca_exito(
-    mock_settings, mock_fecha, mock_token, mock_cuestionarios, mock_storage, caplog
-):
+def test_error_de_persistencia_no_marca_exito(caplog):
     from src.storage import StorageConflictError
 
-    mock_cuestionarios.return_value = [{"id": 1, "fecha": "2026-10-14"}]
-    mock_storage.side_effect = StorageConflictError("dato clínico confidencial")
-    assert main() == 1
+    lote = [{"id": 1, "fecha": "2026-10-14"}]
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.get_access_token", return_value="token-ficticio"),
+        patch("src.daily.get_cuestionarios", return_value=lote),
+        patch("src.daily.is_processed", return_value=False),
+        patch(
+            "src.daily.persist_day",
+            side_effect=StorageConflictError("dato clínico confidencial"),
+        ),
+        patch("src.daily.record_failure") as failed,
+    ):
+        assert main() == 1
     assert "dato clínico confidencial" not in caplog.text
+    assert failed.call_args.kwargs == {}
+    assert failed.call_args.args[4] == "STORAGE_ERROR"
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_dia_exitoso_se_omite_sin_llamar_api():
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.is_processed", return_value=True),
+        patch("src.daily.get_access_token") as auth,
+        patch("src.daily.persist_day") as persist,
+    ):
+        assert main() == 0
+    auth.assert_not_called()
+    persist.assert_not_called()
+
+
+@patch.dict("os.environ", {"DATABASE_URL": "postgresql://ficticio"})
+def test_error_api_registra_failed_sin_datos_clinicos():
+    from src.client import MedicloudAPIError
+
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 14)),
+        patch("src.daily.is_processed", return_value=False),
+        patch("src.daily.get_access_token", return_value="token-ficticio"),
+        patch(
+            "src.daily.get_cuestionarios",
+            side_effect=MedicloudAPIError("detalle sensible"),
+        ),
+        patch("src.daily.record_failure") as failed,
+    ):
+        assert main() == 1
+    assert failed.call_args.args[4] == "API_ERROR"
+    assert failed.call_args.args[5] == 0
+    assert failed.call_args.args[6] == "not_available"
