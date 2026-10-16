@@ -7,12 +7,15 @@ import os
 import sys
 from datetime import UTC, date, datetime, timedelta
 
+from dotenv import load_dotenv
+
 from src.audit import (
     NO_HASH,
     AuditError,
     batch_hash,
     is_processed,
     new_load_id,
+    pending_days,
     persist_day,
     record_failure,
 )
@@ -43,6 +46,8 @@ class JsonFormatter(logging.Formatter):
 logger = logging.getLogger(__name__)
 _json_handler = logging.StreamHandler(sys.stderr)
 _json_handler.setFormatter(JsonFormatter())
+
+MAX_RECOVERY_DAYS = 7
 
 
 def configure_logging() -> None:
@@ -191,6 +196,61 @@ def run_date_range(
     return 0
 
 
+def run_recovery() -> int:
+    """Recupera hasta siete días pendientes, nunca anteriores a configuración."""
+    configure_logging()
+    load_dotenv()
+    raw_start = os.getenv("CLISUENO_START_DATE")
+    if not raw_start:
+        logger.error("CLISUENO_START_DATE es obligatorio para --recover.")
+        return 1
+
+    try:
+        first_day = parse_iso_date(raw_start)
+    except argparse.ArgumentTypeError:
+        logger.error("CLISUENO_START_DATE debe tener formato YYYY-MM-DD.")
+        return 1
+
+    last_day = previous_day()
+    if first_day > last_day:
+        logger.error("CLISUENO_START_DATE supera el último día completo.")
+        return 1
+
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        logger.error("DATABASE_URL no configurada.")
+        return 1
+
+    try:
+        days = pending_days(
+            database_url, first_day, last_day, limit=MAX_RECOVERY_DAYS
+        )
+    except AuditError:
+        logger.error("No fue posible consultar días pendientes.")
+        return 1
+
+    if not days:
+        logger.info("No hay días pendientes de recuperación.")
+        return 0
+
+    logger.info(
+        "Recuperación: %d fechas pendientes seleccionadas, de %s a %s.",
+        len(days), days[0], days[-1],
+    )
+    for day in days:
+        if main(target_date=day) != 0:
+            logger.error("Recuperación detenida en fecha: %s", day)
+            return 1
+
+    if len(days) == MAX_RECOVERY_DAYS:
+        logger.info(
+            "Límite de %d días alcanzado; la siguiente ejecución "
+            "comprobará si quedan pendientes.",
+            MAX_RECOVERY_DAYS,
+        )
+    return 0
+
+
 def cli(argv: list[str] | None = None) -> int:
     """Interfaz de ejecución diaria o manual por fecha e intervalo."""
     parser = argparse.ArgumentParser(description="Extracción diaria MediCloud")
@@ -210,7 +270,19 @@ def cli(argv: list[str] | None = None) -> int:
         "--end-date", type=parse_iso_date,
         help="Fecha final inclusiva del intervalo manual, YYYY-MM-DD",
     )
+    parser.add_argument(
+        "--recover", action="store_true",
+        help="Recuperar días sin success desde CLISUENO_START_DATE "
+             "(máximo 7 por ejecución; requiere PostgreSQL)",
+    )
     args = parser.parse_args(argv)
+    if args.recover:
+        if (
+            args.dry_run or args.target_date is not None
+            or args.start_date is not None or args.end_date is not None
+        ):
+            parser.error("--recover no admite --dry-run ni fechas manuales")
+        return run_recovery()
     if args.target_date is not None and (
         args.start_date is not None or args.end_date is not None
     ):
