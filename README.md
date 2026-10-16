@@ -183,13 +183,30 @@ python -m src.daily --start-date 2026-10-01 --end-date 2026-10-10 --dry-run
 python -m src.daily
 ```
 
-**Validación confirmada previamente:** 127 pruebas superadas y Ruff sin errores antes de incorporar el bloqueo diario por fecha, que requiere una nueva validación WSL. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
+**Validación confirmada previamente:** 134 pruebas superadas en WSL y Ruff sin errores, además de pruebas de concurrencia y recuperación con PostgreSQL local. La renovación de token introducida posteriormente aún requiere pruebas en WSL. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
 
-**Importante:** recuperación y bloqueo global ya validados en WSL y PostgreSQL local; el nuevo bloqueo por fecha aún requiere validación. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
+**Importante:** recuperación y bloqueos global y por fecha validados con PostgreSQL local y procesos simulados. La renovación de token está pendiente de comprobar en WSL. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
 
 Las fechas se expresan como `YYYY-MM-DD`. No se admiten días posteriores a ayer en `America/Bogota`. Para intervalos, se requieren ambas fechas y `--date` no se puede combinar con ellas.
 
 Cada fecha se consulta por separado, de modo que respeta el límite de la API de 10 días por petición. En modo normal, cada día confirma cuestionarios y auditoría en la misma transacción; los días con `success` anterior se omiten. Un fallo detiene el intervalo y no revierte las fechas ya confirmadas. En `--dry-run` no se consulta ni se modifica PostgreSQL.
+
+### 7.1.1. Renovación controlada del token
+
+Cada fecha obtiene inicialmente un Bearer Token nuevo. Si la consulta a
+`/apisueno/getCuestionarioSueno` responde con **HTTP 401**, el proceso solicita
+un nuevo token a `/auth/getToken` y repite **esa consulta una sola vez**.
+Un segundo 401 provoca un error `AUTH_ERROR` y detiene la fecha; si la
+renovación falla, también se registra `AUTH_ERROR`.
+
+**HTTP 403 no renueva el token** y se trata como error de consulta
+`API_ERROR`. Los errores transitorios 429/5xx conservan los reintentos HTTP
+ya existentes; no activan renovación de token. Los mensajes de excepción
+y los logs no incluyen el token ni el contenido de la respuesta.
+
+Este mecanismo se aplica tanto a ejecuciones normales como a `--dry-run`;
+este último continúa sin acceder a PostgreSQL. La implementación
+se encuentra en la rama de desarrollo **pendiente de validación WSL**.
 
 ### 7.2. Recuperación explícita de días pendientes (pendiente de validación)
 
