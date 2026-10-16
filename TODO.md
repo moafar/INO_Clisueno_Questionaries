@@ -10,7 +10,7 @@
 
 **Pruebas:** 134 superadas en WSL (5,53 s), Ruff sin errores (16-oct-2026). PostgreSQL local: recuperación simulada, bloqueos global y por fecha, coexistencia y liberación de bloqueos validados sin escrituras.
 
-**Prioridad actual:** revisar seguridad y resiliencia (expiración de token, fallos HTTP, protección de secretos), después observabilidad y despliegue antes de autorizar cargas clínicas o activar `systemd`.
+**Prioridad actual:** validar en WSL el mecanismo nuevo de renovación del Bearer Token tras HTTP 401, con un solo reintento y sin reintentar HTTP 403; después revisar errores HTTP, protección de secretos y observabilidad antes de autorizar cargas clínicas o activar `systemd`.
 
 La extracción histórica queda aplazada.
 
@@ -120,7 +120,7 @@ cuando la API responde de manera válida.
 
 ## 3. Prioridad alta — Seguridad y resiliencia
 
-- [ ] Gestionar expiración o rechazo del Bearer Token.
+- [ ] Validar en WSL la renovación controlada del Bearer Token al recibir HTTP 401 en la extracción: código implementado, segundo token y única repetición de consulta; segundo 401 y fallo de renovación detienen el proceso con `AUTH_ERROR`. HTTP 403 no renueva y detiene con `API_ERROR`. Pruebas con mocks y servidor HTTP local añadidas, aún no ejecutadas.
 - [ ] Diferenciar errores recuperables y permanentes.
 - [ ] Revisar los límites de reintentos y tiempos de espera.
 - [ ] Evitar reintentos indefinidos.
@@ -250,7 +250,8 @@ La carga histórica no forma parte del alcance inmediato.
 - **Última validación completada:** 134 pruebas en 5,53 s y Ruff sin errores. En PostgreSQL local, `exclusive_day()` rechaza una segunda conexión para la misma fecha y permite otra fecha; `exclusive_recovery()` y `exclusive_day()` coexisten y la fecha vuelve a estar disponible tras liberación. Sin consultas MediCloud ni escrituras.
 - **Rollback y reanudación transaccional confirmados:** un proceso auxiliar insertó un cuestionario ficticio y un `success` de auditoría en la misma transacción sin `COMMIT`; tras `SIGKILL` ambas inserciones se revirtieron (0 filas) y se liberó el bloqueo. `persist_day()` confirmó después el mismo día (1 cuestionario y 1 auditoría); al repetir, devolvió `already_processed` y 0 nuevos. Se eliminaron ambos registros de prueba. Esto verifica la capa transaccional; no constituye una prueba extremo a extremo del CLI ni de MediCloud.
 - **Prueba de concurrencia con dos procesos reales completada:** `main()` del primer proceso mantuvo `exclusive_day()` durante una API simulada pausada; el segundo `main()` devolvió 1 sin entrar en la API. El primero terminó con 0; ambas tablas permanecieron vacías. Se usó PostgreSQL local real con mocks de MediCloud y persistencia. Sin escrituras ni acceso a producción.
-- **Pendientes prioritarios:** expiración/rechazo de token, manejo de fallos HTTP, protección de secretos, alertas y preparación del despliegue autónomo.
+- **Renovación controlada incorporada (pendiente de validación WSL):** `src.client` distingue HTTP 401 mediante `MedicloudUnauthorizedError`. `src.daily.main()` adquiere un nuevo token y repite una única vez la solicitud, sin bucles; registra `AUTH_ERROR` si falla la renovación o persiste el 401. HTTP 403 y otros errores API no renuevan token. Se añadieron pruebas unitarias y una integración con servidor HTTP local sin PostgreSQL ni MediCloud.
+- **Pendientes prioritarios:** ejecutar Ruff y pytest en WSL; revisar otros fallos HTTP, protección de secretos, alertas y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** sincronizar `TODO.md` en WSL y revisar una salvaguarda de seguridad/resiliencia por vez, comenzando por la expiración o rechazo del Bearer Token. No ejecutar todavía cargas reales ni desplegar en producción.
+- **Próximo paso:** sincronizar la rama en WSL y ejecutar Ruff y pytest para validar la renovación de token; no consultar MediCloud ni persistir datos clínicos.
