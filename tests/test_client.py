@@ -1,8 +1,17 @@
 from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from unittest.mock import patch
 
 import pytest
+import requests
 
-from src.client import get_cuestionarios
+from src.client import (
+    MedicloudAPIError,
+    MedicloudUnauthorizedError,
+    get_cuestionarios,
+)
+from src.config import Settings
 
 
 @pytest.mark.parametrize(
@@ -26,12 +35,6 @@ def test_rechaza_intervalos_invalidos(inicio, fin):
             fecha_inicial=inicio,
             fecha_final=fin,
         )
-
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
-
-from src.config import Settings
-
 
 def test_reintentos_extraccion_http_503():
     class Handler(BaseHTTPRequestHandler):
@@ -87,3 +90,39 @@ def test_reintentos_extraccion_http_503():
         server.shutdown()
         server.server_close()
         thread.join()
+
+@pytest.mark.parametrize(
+    "status, expected_error",
+    [
+        (401, MedicloudUnauthorizedError),
+        (403, MedicloudAPIError),
+    ],
+)
+def test_extraccion_distingue_401_de_403_sin_exponer_token(
+    status, expected_error
+):
+    response = requests.Response()
+    response.status_code = status
+    response.url = "https://example.invalid/apisueno/getCuestionarioSueno"
+
+    with patch("src.client.requests.Session") as session_class:
+        session = session_class.return_value
+        session.post.return_value = response
+        with pytest.raises(expected_error) as exc:
+            get_cuestionarios(
+                settings=Settings(
+                    base_url="https://example.invalid",
+                    app_id="ficticio",
+                    app_key="ficticia",
+                    resource="ficticio",
+                    api_version="1",
+                ),
+                token="token-supersecreto-ficticio",
+                fecha_inicial=date(2000, 1, 20),
+                fecha_final=date(2000, 1, 20),
+            )
+
+    assert type(exc.value) is expected_error
+    assert "token-supersecreto-ficticio" not in str(exc.value)
+    session.post.assert_called_once()
+    session.close.assert_called_once()
