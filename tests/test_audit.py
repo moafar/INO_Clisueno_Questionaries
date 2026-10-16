@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.audit import (
+    NO_HASH,
     AuditError,
     ConcurrentExecutionError,
-    NO_HASH,
     batch_hash,
     is_processed,
     persist_day,
