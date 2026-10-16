@@ -10,7 +10,7 @@
 
 **Pruebas:** 84 superadas en WSL (5,24 s) y Ruff sin errores (16-oct-2026). Pruebas de integración PostgreSQL local superadas; limpieza verificada.
 
-**Prioridad actual:** definir e implementar detección y recuperación automática de días pendientes, con una fecha inicial de operación configurable y sin activar todavía la carga histórica.
+**Prioridad actual:** validar en WSL la ejecución manual por intervalo inclusivo, antes de implementar detección y recuperación automática de días pendientes con fecha inicial configurable.
 
 La extracción histórica queda aplazada.
 
@@ -46,6 +46,8 @@ La extracción histórica queda aplazada.
 - [x] Devolver códigos de salida adecuados.
 - [x] Evitar exposición de información sensible en logs.
 - [x] Crear pruebas automatizadas del proceso diario.
+- [x] Implementar `--date` y validar extracción real `2026-10-10` en `--dry-run` (57 cuestionarios; 0 escrituras confirmadas).
+- [ ] Validar en WSL la nueva opción `--start-date`/`--end-date` y sus pruebas unitarias.
 
 **Criterio de aceptación:**
 
@@ -97,7 +99,7 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Adoptar `audit.load_control` como control de fechas por `pipeline_name`, día y estado `success`; réplica de su DDL e índices creada en PostgreSQL local, sin alterar producción.
 - [x] Registrar ejecuciones correctas y fallidas en `audit.load_control`; reintentos fallidos repetidos probados.
 - [x] Registrar cantidades recibidas y persistidas (`rows_read`, `rows_loaded`).
-- [ ] Implementar detección de días pendientes.
+- [ ] Implementar detección de días pendientes (distinta de la selección manual explícita de intervalos).
 - [ ] Recuperar automáticamente días no procesados.
 - [x] Impedir marcar un día como completado antes del commit; rollback conjunto comprobado.
 - [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
@@ -228,6 +230,9 @@ La carga histórica no forma parte del alcance inmediato.
 - **Limpieza final verificada:** `staging.clisueno_questionaries = 0` registros; `audit.load_control = 0` registros.
 - `source_file_hash`: en `success`, SHA-256 del lote JSON ordenado por `id`; en `failed`, `failed:<load_id>:<SHA-256|not_available>` para permitir reintentos sin cambiar el índice único compartido.
 - `--dry-run` real anterior: 2026-10-15, 59 registros validados, sin escritura en PostgreSQL.
-- Pendientes prioritarios: **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción; posteriormente revisar otros aspectos de resiliencia y preparar despliegue autónomo.
+- Ejecución manual `--date 2026-10-10 --dry-run` probada contra MediCloud: 57 cuestionarios; tablas locales verificadas vacías.
+- **Nuevo en GitHub, pendiente de validación local:** ejecución de intervalo manual inclusivo mediante `--start-date` y `--end-date`, un día por transacción, deteniendo el intervalo al primer error; pruebas de CLI y fechas añadidas.
+- Pendientes prioritarios: validar intervalo manual en WSL; después **fecha inicial configurable, identificación de días pendientes y recuperación automática**, pruebas de interrupción y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
+- **Próximo paso inmediato:** `git pull --ff-only origin feature/postgresql-storage`, Ruff y pytest; posteriormente probar un intervalo manual con `--dry-run` y comprobar que no hubo escrituras.
