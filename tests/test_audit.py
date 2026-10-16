@@ -232,9 +232,11 @@ def test_pending_days_traduce_fallo_de_postgresql_en_error_seguro():
 
 def test_bloqueo_recuperacion_dura_todo_el_contexto():
     conn, cur = fake_connection([(True,)])
-    with patch("src.audit.psycopg.connect", return_value=conn) as connect:
-        with exclusive_recovery(DB):
-            conn.close.assert_not_called()
+    with (
+        patch("src.audit.psycopg.connect", return_value=conn) as connect,
+        exclusive_recovery(DB),
+    ):
+        conn.close.assert_not_called()
     sql, params = cur.execute.call_args.args
     assert "pg_try_advisory_lock" in sql
     assert params == (72482711, 0)
@@ -247,9 +249,9 @@ def test_bloqueo_recuperacion_ocupado_rechaza_segunda_ejecucion():
     with (
         patch("src.audit.psycopg.connect", return_value=conn),
         pytest.raises(ConcurrentExecutionError),
+        exclusive_recovery(DB),
     ):
-        with exclusive_recovery(DB):
-            pytest.fail("No debe iniciar recuperación")
+        pytest.fail("No debe iniciar recuperación")
     conn.close.assert_called_once_with()
 
 
@@ -258,9 +260,9 @@ def test_bloqueo_recuperacion_se_libera_tras_error():
     with (
         patch("src.audit.psycopg.connect", return_value=conn),
         pytest.raises(RuntimeError, match="simulado"),
+        exclusive_recovery(DB),
     ):
-        with exclusive_recovery(DB):
-            raise RuntimeError("simulado")
+        raise RuntimeError("simulado")
     conn.close.assert_called_once_with()
 
 
@@ -271,7 +273,7 @@ def test_bloqueo_recuperacion_error_conexion_no_expone_detalles():
             side_effect=psycopg.OperationalError("clave secreta"),
         ),
         pytest.raises(AuditError, match="bloqueo de recuperación") as exc,
+        exclusive_recovery(DB),
     ):
-        with exclusive_recovery(DB):
-            pytest.fail("No debe entrar")
+        pytest.fail("No debe entrar")
     assert "clave secreta" not in str(exc.value)
