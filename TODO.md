@@ -8,7 +8,7 @@
 
 **Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
 
-**Pruebas:** último resultado confirmado en WSL antes de la auditoría: 68 superadas, Ruff sin errores y `--dry-run` real correcto (16-oct-2026). La ampliación de auditoría no se ha probado todavía en WSL.
+**Pruebas:** última ejecución confirmada en WSL: 82 superadas y Ruff sin errores (16-oct-2026). Las dos pruebas nuevas de unicidad de fallos todavía no se han ejecutado en WSL.
 
 **Prioridad actual:** validar el control de ejecuciones en `audit.load_control` y su transacción compartida con la persistencia.
 
@@ -94,7 +94,7 @@ Se conservan múltiples cuestionarios del mismo paciente.
 
 ### 2.4. Control de ejecuciones y recuperación
 
-- [x] Adoptar `audit.load_control` existente como control de fechas por `pipeline_name`, día y estado `success`; sin DDL adicional.
+- [x] Adoptar `audit.load_control` como control de fechas por `pipeline_name`, día y estado `success`; réplica de su DDL e índices creada en PostgreSQL local, sin alterar producción.
 - [ ] Registrar ejecuciones correctas y fallidas.
 - [ ] Registrar cantidad de registros recibidos y persistidos.
 - [ ] Implementar detección de días pendientes.
@@ -130,7 +130,7 @@ de forma controlada ante fallos persistentes y protege los secretos.
 
 ## 4. Prioridad media — Auditoría y observabilidad
 
-- [x] Reutilizar la estructura existente de `audit.load_control` (sin cambios de esquema).
+- [x] Reutilizar la estructura de producción de `audit.load_control` (réplica local creada y cuatro índices confirmados).
 - [x] Decidir integración de Clisueno con `audit.load_control`, sin alterar los flujos de Labfp.
 - [ ] Registrar inicio y finalización de cada ejecución.
 - [ ] Registrar duración y estado final.
@@ -221,10 +221,10 @@ La carga histórica no forma parte del alcance inmediato.
 - Pruebas PostgreSQL local (datos ficticios): inserción, segunda ejecución sin duplicados y rollback ante conflicto, con limpieza confirmada. Tabla destino vacía al terminar.
 - `--dry-run` real: 2026-10-15, 59 registros validados; cero filas almacenadas.
 - Acuerdo: reutilizar `audit.load_control` para Clisueno, sin migraciones ni modificaciones de Labfp. Estados: `success` y `failed`.
-- `load_id`: UUID por intento; `source_file`: endpoint MediCloud; `source_file_hash`: SHA-256 del JSON ordenado por `id`, o `not_available` si falla antes de tener contenido.
+- `load_id`: UUID por intento; `source_file`: endpoint MediCloud; `source_file_hash`: SHA-256 del JSON ordenado por `id` en éxito; en fallos `failed:<UUID>:<SHA-256|not_available>` para respetar el índice único existente y registrar reintentos.
 - Nuevo código en rama: `src/audit.py`; `src/storage.py` refactorizado para transacción controlada por el llamante; `src/daily.py` persiste y registra `success` de forma atómica, y `failed` en transacción separada; `tests/test_audit.py` y pruebas ampliadas.
-- **Importante:** estos cambios de auditoría todavía NO han superado Ruff/pytest en WSL ni pruebas PostgreSQL local. No realizar cargas reales hasta validarlos.
+- **Validación confirmada:** 82 tests y Ruff sin errores en WSL antes del ajuste del índice único; la nueva corrección y sus dos pruebas requieren validación en WSL y PostgreSQL local. No realizar cargas reales hasta validarlo.
 - El procesamiento sigue siendo solo del día anterior; recuperación automática de días pendientes y fecha inicial de operación configurable quedan pendientes.
 - `--dry-run` debe permanecer sin acceso a PostgreSQL.
 - La unicidad global de `id` se asume por decisión funcional y no ha sido demostrada externamente.
-- **Siguiente tarea:** sincronizar la rama en WSL y ejecutar Ruff y suite completa, corregir hallazgos antes de probar la transacción compartida con registros ficticios.
+- **Siguiente tarea:** sincronizar rama, ejecutar Ruff y suite completa (esperado 84 tests); verificar auditoría `success`/`failed` y rollback con registros ficticios en PostgreSQL local. No tocar producción.
