@@ -105,7 +105,9 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
 - [x] Validar 120 pruebas en WSL y las consultas de recuperación en PostgreSQL local; simulación de interrupción por error y reanudación superada, con limpieza confirmada.
 - [x] Validar en WSL y PostgreSQL local el bloqueo exclusivo de sesión para recuperaciones simultáneas: segunda ejecución rechazada y nueva ejecución admitida tras liberar el bloqueo; 127 pruebas automatizadas y Ruff superados.
-- [ ] Probar interrupciones abruptas del proceso (kill/crash) y concurrencia mixta con ejecuciones manuales/diarias.
+- [x] Comprobar con PostgreSQL local que un bloqueo exclusivo de sesión se libera tras `SIGKILL` del proceso auxiliar y puede adquirirse de nuevo sin intervención humana.
+- [ ] Probar la recuperación tras interrupción durante una transacción de escritura (rollback y posterior reanudación).
+- [ ] Probar concurrencia mixta entre `--recover` y ejecuciones manuales/diarias.
 
 **Criterio de aceptación:**
 
@@ -241,7 +243,8 @@ La carga histórica no forma parte del alcance inmediato.
 - **Limpieza posterior confirmada:** `staging.clisueno_questionaries = 0` y `audit.load_control = 0`.
 - **Bloqueo de recuperación validado:** `exclusive_recovery()` obtiene `pg_try_advisory_lock` de sesión con clave reservada `(LOCK_NAMESPACE, 0)` y mantiene su conexión durante la selección y procesamiento de todos los días. En PostgreSQL local, una segunda recuperación simultánea fue rechazada y, tras cerrar la primera, se pudo adquirir el bloqueo nuevamente. La conexión se cierra al finalizar o fallar; sigue existiendo bloqueo transaccional por día para otras modalidades.
 - **Validación más reciente:** 127 pruebas aprobadas en 5,43 s, Ruff sin errores y prueba de bloqueo de sesión sobre PostgreSQL local superada. Ajustes de estilo en `tests/test_audit.py` guardados y publicados en commit `7b5f9dc`.
-- **Pendientes prioritarios:** interrupciones abruptas, concurrencia mixta, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
+- **Interrupción abrupta probada:** un proceso auxiliar adquirió `exclusive_recovery()`, la segunda conexión fue rechazada, el proceso auxiliar terminó con `SIGKILL` y un nuevo intento adquirió el bloqueo liberado. Prueba sin consultas MediCloud ni escrituras SQL. Esto verifica liberación de bloqueo, no rollback de una transacción de persistencia interrumpida.
+- **Pendientes prioritarios:** concurrencia mixta, rollback tras interrupción de una escritura, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** sincronizar `TODO.md` en WSL, revisar y probar liberación del bloqueo ante terminación abrupta del proceso y luego concurrencia mixta. No ejecutar todavía `--recover` contra MediCloud ni persistir datos clínicos.
+- **Próximo paso:** sincronizar `TODO.md` en WSL y comprobar concurrencia mixta con procesos simulados, sin consultar MediCloud ni persistir datos clínicos.
