@@ -109,9 +109,11 @@ def test_repetir_lote_es_idempotente():
 
 def test_conflicto_provoca_rollback_total():
     conn = FakeConnection({2: content_hash(sample(2, "anterior"))})
-    with patch("src.storage.psycopg.connect", return_value=conn):
-        with pytest.raises(StorageConflictError, match="contenido diferente"):
-            store_questionnaires(
+    with (
+        patch("src.storage.psycopg.connect", return_value=conn),
+        pytest.raises(StorageConflictError, match="contenido diferente"),
+    ):
+        store_questionnaires(
                 "postgresql://ficticio", [sample(1), sample(2, "nuevo")]
             )
     assert conn.rolled_back
@@ -119,18 +121,22 @@ def test_conflicto_provoca_rollback_total():
 
 
 def test_rechaza_ids_duplicados_antes_de_conectar():
-    with patch("src.storage.psycopg.connect") as connect:
-        with pytest.raises(StorageError, match="repetido"):
-            store_questionnaires("postgresql://ficticio", [sample(), sample()])
+    with (
+        patch("src.storage.psycopg.connect") as connect,
+        pytest.raises(StorageError, match="repetido"),
+    ):
+        store_questionnaires("postgresql://ficticio", [sample(), sample()])
     connect.assert_not_called()
 
 
 def test_rechaza_fecha_invalida_antes_de_conectar():
     record = sample()
     record["fecha"] = "2026-02-30"
-    with patch("src.storage.psycopg.connect") as connect:
-        with pytest.raises(StorageError, match="Fecha"):
-            store_questionnaires("postgresql://ficticio", [record])
+    with (
+        patch("src.storage.psycopg.connect") as connect,
+        pytest.raises(StorageError, match="Fecha"),
+    ):
+        store_questionnaires("postgresql://ficticio", [record])
     connect.assert_not_called()
 
 
