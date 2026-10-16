@@ -8,7 +8,8 @@ import pytest
 
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
-from src.daily import cli, main, parse_iso_date, run_date_range
+from src.audit import AuditError
+from src.daily import cli, main, parse_iso_date, run_date_range, run_recovery
 from src.validation import QuestionnaireValidationError
 
 
@@ -406,3 +407,145 @@ def test_cli_mantiene_opcion_diaria_por_defecto():
     with patch("src.daily.main", return_value=0) as process:
         assert cli([]) == 0
     process.assert_called_once_with(dry_run=False, target_date=None)
+
+
+def test_recovery_procesa_solo_pendientes_en_orden():
+    days = [date(2026, 10, 10), date(2026, 10, 12), date(2026, 10, 15)]
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days", return_value=days) as fetch,
+        patch("src.daily.main", return_value=0) as process,
+    ):
+        assert run_recovery() == 0
+    fetch.assert_called_once_with(
+        "postgresql://ficticio", date(2026, 10, 10),
+        date(2026, 10, 15), limit=7,
+    )
+    assert process.call_args_list == [
+        call(target_date=day) for day in days
+    ]
+
+
+def test_recovery_interrumpe_en_primer_dia_fallido():
+    days = [date(2026, 10, 10), date(2026, 10, 11), date(2026, 10, 12)]
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days", return_value=days),
+        patch("src.daily.main", side_effect=[0, 1, 0]) as process,
+    ):
+        assert run_recovery() == 1
+    assert process.call_args_list == [
+        call(target_date=days[0]), call(target_date=days[1]),
+    ]
+
+
+def test_recovery_sin_pendientes_no_consulta_medicloud():
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days", return_value=[]),
+        patch("src.daily.main") as process,
+    ):
+        assert run_recovery() == 0
+    process.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "start, database",
+    [
+        ("", "postgresql://ficticio"),
+        ("formato-invalido", "postgresql://ficticio"),
+        ("2026-10-16", "postgresql://ficticio"),
+        ("2026-10-10", ""),
+    ],
+)
+def test_recovery_configuracion_invalida_nunca_consulta_auditoria(
+    start, database
+):
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": start,
+            "DATABASE_URL": database,
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days") as fetch,
+        patch("src.daily.main") as process,
+    ):
+        assert run_recovery() == 1
+    fetch.assert_not_called()
+    process.assert_not_called()
+
+
+def test_recovery_fallo_auditoria_no_ejecuta_dias():
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days", side_effect=AuditError("secreto")),
+        patch("src.daily.main") as process,
+    ):
+        assert run_recovery() == 1
+    process.assert_not_called()
+
+
+def test_recovery_limite_siete_por_ejecucion():
+    from datetime import timedelta
+
+    days = [date(2026, 10, 1) + timedelta(days=offset) for offset in range(7)]
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-01",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.pending_days", return_value=days) as fetch,
+        patch("src.daily.main", return_value=0) as process,
+    ):
+        assert run_recovery() == 0
+    assert fetch.call_args.kwargs["limit"] == 7
+    assert process.call_count == 7
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--recover", "--dry-run"],
+        ["--recover", "--date", "2026-10-10"],
+        ["--recover", "--start-date", "2026-10-09", "--end-date", "2026-10-10"],
+    ],
+)
+def test_cli_recovery_no_admite_simulacion_ni_fechas_manuales(arguments):
+    with (
+        patch("src.daily.run_recovery") as recover,
+        patch("src.daily.main") as process,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli(arguments)
+    assert exc.value.code == 2
+    recover.assert_not_called()
+    process.assert_not_called()
+
+
+def test_cli_recovery_solo_se_activa_explicitamente():
+    with patch("src.daily.run_recovery", return_value=0) as recover:
+        assert cli(["--recover"]) == 0
+    recover.assert_called_once_with()
