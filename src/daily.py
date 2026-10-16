@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from src.audit import (
     NO_HASH,
@@ -163,7 +163,30 @@ def main(dry_run: bool = False, *, target_date: date | None = None) -> int:
         logger.error("La extracción diaria ha fallado.")
         return 1
 
-if __name__ == "__main__":
+def run_date_range(
+    start_date: date, end_date: date, *, dry_run: bool = False
+) -> int:
+    """Procesa días consecutivos con auditoría y transacción por fecha.
+
+    Ante un fallo, conserva los éxitos anteriores y detiene el intervalo.
+    """
+    if start_date > end_date:
+        logger.error("Intervalo inválido: la fecha inicial supera la final.")
+        return 1
+    if end_date > previous_day():
+        logger.error("Intervalo inválido: contiene fechas no completadas.")
+        return 1
+
+    for offset in range((end_date - start_date).days + 1):
+        day = start_date + timedelta(days=offset)
+        if main(dry_run=dry_run, target_date=day) != 0:
+            logger.error("Intervalo detenido por fallo en la fecha: %s", day)
+            return 1
+    return 0
+
+
+def cli(argv: list[str] | None = None) -> int:
+    """Interfaz de ejecución diaria o manual por fecha e intervalo."""
     parser = argparse.ArgumentParser(description="Extracción diaria MediCloud")
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -173,5 +196,27 @@ if __name__ == "__main__":
         "--date", type=parse_iso_date, dest="target_date",
         help="Procesar una fecha concreta, YYYY-MM-DD (hasta ayer en Colombia)",
     )
-    args = parser.parse_args()
-    sys.exit(main(dry_run=args.dry_run, target_date=args.target_date))
+    parser.add_argument(
+        "--start-date", type=parse_iso_date,
+        help="Fecha inicial del intervalo manual, YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--end-date", type=parse_iso_date,
+        help="Fecha final inclusiva del intervalo manual, YYYY-MM-DD",
+    )
+    args = parser.parse_args(argv)
+    if args.target_date is not None and (
+        args.start_date is not None or args.end_date is not None
+    ):
+        parser.error("--date no puede combinarse con --start-date/--end-date")
+    if (args.start_date is None) != (args.end_date is None):
+        parser.error("--start-date y --end-date deben indicarse juntos")
+    if args.start_date is not None:
+        return run_date_range(
+            args.start_date, args.end_date, dry_run=args.dry_run
+        )
+    return main(dry_run=args.dry_run, target_date=args.target_date)
+
+
+if __name__ == "__main__":
+    sys.exit(cli())
