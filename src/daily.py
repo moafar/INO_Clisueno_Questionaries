@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from src.audit import (
     AuditError,
@@ -45,7 +45,22 @@ _json_handler = logging.StreamHandler(sys.stderr)
 _json_handler.setFormatter(JsonFormatter())
 
 
-def main(dry_run: bool = False) -> int:
+def parse_iso_date(value: str) -> date:
+    """Acepta únicamente fechas ISO completas, YYYY-MM-DD."""
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "La fecha debe tener formato YYYY-MM-DD"
+        ) from exc
+    if parsed.isoformat() != value:
+        raise argparse.ArgumentTypeError(
+            "La fecha debe tener formato YYYY-MM-DD"
+        )
+    return parsed
+
+
+def main(dry_run: bool = False, *, target_date: date | None = None) -> int:
     """Extrae y valida; en modo normal confirma carga y auditoría juntas."""
     logger.setLevel(logging.INFO)
     if _json_handler not in logger.handlers:
@@ -61,7 +76,10 @@ def main(dry_run: bool = False) -> int:
 
     try:
         settings = load_settings()
-        fecha = previous_day()
+        last_complete_day = previous_day()
+        if target_date is not None and target_date > last_complete_day:
+            raise ValueError("La fecha solicitada no está completada")
+        fecha = target_date if target_date is not None else last_complete_day
 
         if not dry_run:
             database_url = os.getenv("DATABASE_URL")
@@ -151,5 +169,9 @@ if __name__ == "__main__":
         "--dry-run", action="store_true",
         help="Extrae y valida sin insertar datos en PostgreSQL",
     )
+    parser.add_argument(
+        "--date", type=parse_iso_date, dest="target_date",
+        help="Procesar una fecha concreta, YYYY-MM-DD (hasta ayer en Colombia)",
+    )
     args = parser.parse_args()
-    sys.exit(main(dry_run=args.dry_run))
+    sys.exit(main(dry_run=args.dry_run, target_date=args.target_date))
