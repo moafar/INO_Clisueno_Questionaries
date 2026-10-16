@@ -12,7 +12,9 @@ from dotenv import load_dotenv
 from src.audit import (
     NO_HASH,
     AuditError,
+    ConcurrentExecutionError,
     batch_hash,
+    exclusive_recovery,
     is_processed,
     new_load_id,
     pending_days,
@@ -221,6 +223,21 @@ def run_recovery() -> int:
         logger.error("DATABASE_URL no configurada.")
         return 1
 
+    try:
+        with exclusive_recovery(database_url):
+            return _process_recovery_days(database_url, first_day, last_day)
+    except ConcurrentExecutionError:
+        logger.error("Otra recuperación de Clisueno sigue activa.")
+        return 1
+    except AuditError:
+        logger.error("No fue posible obtener el bloqueo de recuperación.")
+        return 1
+
+
+def _process_recovery_days(
+    database_url: str, first_day: date, last_day: date
+) -> int:
+    """Consulta y procesa pendientes mientras se mantiene el bloqueo global."""
     try:
         days = pending_days(
             database_url, first_day, last_day, limit=MAX_RECOVERY_DAYS
