@@ -2,8 +2,8 @@
 
 import argparse
 import json
-import os
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 
