@@ -10,6 +10,9 @@ from src.config import Settings
 class MedicloudAPIError(Exception):
     """Error al consultar la API de MediCloud."""
 
+class MedicloudUnauthorizedError(MedicloudAPIError):
+    """HTTP 401: el token utilizado para esta consulta no fue autorizado."""
+
 
 def get_cuestionarios(
     settings: Settings,
@@ -61,6 +64,10 @@ def get_cuestionarios(
             timeout=(10, 120),
         )
 
+        if response.status_code == 401:
+            raise MedicloudUnauthorizedError(
+                "MediCloud rechazó el token de acceso (HTTP 401)"
+            )
         response.raise_for_status()
         payload = response.json()
 
