@@ -1,5 +1,6 @@
 """Pruebas del punto de entrada de la extracción diaria."""
 
+import argparse
 from datetime import date
 from unittest.mock import patch
 
@@ -7,7 +8,7 @@ import pytest
 
 from src.auth import MedicloudAuthError
 from src.client import MedicloudAPIError
-from src.daily import main
+from src.daily import main, parse_iso_date
 from src.validation import QuestionnaireValidationError
 
 
@@ -261,3 +262,58 @@ def test_error_api_registra_failed_sin_datos_clinicos():
     assert failed.call_args.args[4] == "API_ERROR"
     assert failed.call_args.args[5] == 0
     assert failed.call_args.args[6] == "not_available"
+
+
+def test_fecha_manual_ejecuta_solo_dia_solicitado():
+    requested = date(2026, 10, 10)
+    lote = [{"id": 1, "fecha": requested.isoformat()}]
+    with (
+        patch("src.daily.load_settings") as settings,
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.get_access_token", return_value="token-ficticio"),
+        patch("src.daily.get_cuestionarios", return_value=lote) as api,
+        patch("src.daily.is_processed") as check,
+        patch("src.daily.persist_day") as persist,
+    ):
+        assert main(dry_run=True, target_date=requested) == 0
+    api.assert_called_once_with(
+        settings=settings.return_value,
+        token="token-ficticio",
+        fecha_inicial=requested,
+        fecha_final=requested,
+    )
+    check.assert_not_called()
+    persist.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-10-10", "2026-02-28"],
+)
+def test_fecha_manual_parser_valida(value):
+    assert parse_iso_date(value) == date.fromisoformat(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-2-3", "20261010", "2026-02-30", "no-es-fecha"],
+)
+def test_fecha_manual_parser_rechaza_formato_invalido(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_iso_date(value)
+
+
+def test_fecha_manual_rechaza_hoy_y_futuro_sin_consultar_api():
+    with (
+        patch("src.daily.load_settings"),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.get_access_token") as auth,
+        patch("src.daily.get_cuestionarios") as api,
+        patch("src.daily.is_processed") as check,
+        patch("src.daily.record_failure") as failure,
+    ):
+        assert main(dry_run=False, target_date=date(2026, 10, 16)) == 1
+    auth.assert_not_called()
+    api.assert_not_called()
+    check.assert_not_called()
+    failure.assert_not_called()
