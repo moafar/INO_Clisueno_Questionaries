@@ -22,6 +22,9 @@ DB = "postgresql://ficticio"
 
 def fake_connection(fetch_results=()):
     conn = MagicMock()
+    # Un context manager de psycopg devuelve la misma conexión.
+    # MagicMock, en cambio, crea otro objeto salvo que lo configuremos.
+    conn.__enter__.return_value = conn
     cur = conn.cursor.return_value.__enter__.return_value
     cur.fetchone.side_effect = list(fetch_results)
     return conn, cur
