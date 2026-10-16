@@ -10,7 +10,7 @@
 
 **Pruebas:** 134 superadas en WSL (5,53 s), Ruff sin errores (16-oct-2026). PostgreSQL local: recuperación simulada, bloqueos global y por fecha, coexistencia y liberación de bloqueos validados sin escrituras.
 
-**Prioridad actual:** probar rollback tras interrupción durante la transacción de escritura y reanudación sin duplicados. Después revisar seguridad, observabilidad y despliegue antes de autorizar cargas clínicas o activar `systemd`.
+**Prioridad actual:** probar con dos procesos reales una concurrencia extremo a extremo mediante API simulada, sin consultas MediCloud ni cargas clínicas. Después revisar seguridad, observabilidad y despliegue antes de autorizar cargas clínicas o activar `systemd`.
 
 La extracción histórica queda aplazada.
 
@@ -106,7 +106,7 @@ Se conservan múltiples cuestionarios del mismo paciente.
 - [x] Validar 120 pruebas en WSL y las consultas de recuperación en PostgreSQL local; simulación de interrupción por error y reanudación superada, con limpieza confirmada.
 - [x] Validar en WSL y PostgreSQL local el bloqueo exclusivo de sesión para recuperaciones simultáneas: segunda ejecución rechazada y nueva ejecución admitida tras liberar el bloqueo; 127 pruebas automatizadas y Ruff superados.
 - [x] Comprobar con PostgreSQL local que un bloqueo exclusivo de sesión se libera tras `SIGKILL` del proceso auxiliar y puede adquirirse de nuevo sin intervención humana.
-- [ ] Probar la recuperación tras interrupción durante una transacción de escritura (rollback y posterior reanudación).
+- [x] Probar en PostgreSQL local interrupción de una transacción de escritura con `SIGKILL`: inserción ficticia y auditoría `success` no confirmadas fueron revertidas, y se liberó el bloqueo transaccional. Posteriormente, `persist_day()` pudo confirmar el día y un segundo intento lo omitió sin duplicados; registros ficticios eliminados.
 - [x] Validar bloqueo por fecha anterior a la consulta MediCloud: 134 pruebas automatizadas y Ruff superados; PostgreSQL local rechaza segunda ejecución de igual fecha, permite fechas distintas y libera el bloqueo al terminar. Probada coexistencia con el bloqueo global de recuperación; `--dry-run` no accede a PostgreSQL ni adquiere bloqueo.
 - [ ] Probar end-to-end dos procesos reales concurrentes con API simulada local; las pruebas actuales verifican contratos unitarios y bloqueos reales de PostgreSQL por separado.
 
@@ -248,7 +248,8 @@ La carga histórica no forma parte del alcance inmediato.
 - **Interrupción abrupta probada:** un proceso auxiliar adquirió `exclusive_recovery()`, la segunda conexión fue rechazada, el proceso auxiliar terminó con `SIGKILL` y un nuevo intento adquirió el bloqueo liberado. Prueba sin consultas MediCloud ni escrituras SQL. Esto verifica liberación de bloqueo, no rollback de una transacción de persistencia interrumpida.
 - **Concurrencia mixta identificada:** el bloqueo global `(LOCK_NAMESPACE, 0)` y el transaccional diario `(LOCK_NAMESPACE, ordinal)` pueden coexistir; no bastan para evitar dos consultas MediCloud antes de la escritura. Implementado `exclusive_day()` con bloqueo de sesión `(LOCK_NAMESPACE, -ordinal)` adquirido antes de `is_processed` y la autenticación y mantenido durante extracción, persistencia y auditoría del fallo. Si la fecha está ocupada, se rechaza sin consulta API ni registro `failed`. Pendiente validar la implementación recién publicada.
 - **Última validación completada:** 134 pruebas en 5,53 s y Ruff sin errores. En PostgreSQL local, `exclusive_day()` rechaza una segunda conexión para la misma fecha y permite otra fecha; `exclusive_recovery()` y `exclusive_day()` coexisten y la fecha vuelve a estar disponible tras liberación. Sin consultas MediCloud ni escrituras.
-- **Pendientes prioritarios:** rollback tras interrupción durante una escritura, prueba concurrente extremo a extremo con API simulada, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
+- **Rollback y reanudación transaccional confirmados:** un proceso auxiliar insertó un cuestionario ficticio y un `success` de auditoría en la misma transacción sin `COMMIT`; tras `SIGKILL` ambas inserciones se revirtieron (0 filas) y se liberó el bloqueo. `persist_day()` confirmó después el mismo día (1 cuestionario y 1 auditoría); al repetir, devolvió `already_processed` y 0 nuevos. Se eliminaron ambos registros de prueba. Esto verifica la capa transaccional; no constituye una prueba extremo a extremo del CLI ni de MediCloud.
+- **Pendientes prioritarios:** prueba concurrente extremo a extremo con API simulada, renovación de credenciales y alertas antes de cargas reales y despliegue autónomo.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
 - No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Próximo paso:** sincronizar `TODO.md` en WSL y probar rollback de una transacción interrumpida con datos ficticios; asegurar limpieza. No ejecutar `--recover` contra MediCloud ni persistir datos clínicos reales.
+- **Próximo paso:** sincronizar `TODO.md` en WSL y preparar una prueba de dos procesos concurrentes con API simulada, sin consultar MediCloud ni persistir datos clínicos reales.
