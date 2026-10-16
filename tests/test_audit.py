@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
+import psycopg
 import pytest
 
 from src.audit import (
@@ -11,6 +12,7 @@ from src.audit import (
     ConcurrentExecutionError,
     batch_hash,
     is_processed,
+    pending_days,
     persist_day,
     record_failure,
 )
@@ -176,3 +178,52 @@ def test_fallos_sin_respuesta_tambien_tienen_valores_unicos():
         "failed:run-5:not_available",
         "failed:run-6:not_available",
     ]
+
+
+def test_pending_days_busca_solo_fechas_sin_success_de_clisueno():
+    first = date(2026, 10, 10)
+    last = date(2026, 10, 15)
+    conn, cur = fake_connection()
+    cur.fetchall.return_value = [(first,), (date(2026, 10, 12),)]
+    with patch("src.audit.psycopg.connect", return_value=conn):
+        pending = pending_days(DB, first, last, limit=2)
+    assert pending == [first, date(2026, 10, 12)]
+    sql, params = cur.execute.call_args.args
+    assert "generate_series(" in sql
+    assert "NOT EXISTS" in sql
+    assert "audit.status = 'success'" in sql
+    assert "audit.source_start_date = days.day::date" in sql
+    assert "audit.source_end_date = days.day::date" in sql
+    assert params == (
+        first, last, "clisueno_questionaries_daily",
+        "staging", "clisueno_questionaries", 2,
+    )
+    assert "LIMIT %s" in sql
+
+
+@pytest.mark.parametrize(
+    "first,last,limit",
+    [
+        (date(2026, 10, 15), date(2026, 10, 14), 7),
+        (date(2026, 10, 14), date(2026, 10, 15), 0),
+    ],
+)
+def test_pending_days_rechaza_limites_invalidos_sin_conexion(
+    first, last, limit
+):
+    with (
+        patch("src.audit.psycopg.connect") as connect,
+        pytest.raises(ValueError),
+    ):
+        pending_days(DB, first, last, limit=limit)
+    connect.assert_not_called()
+
+
+def test_pending_days_traduce_fallo_de_postgresql_en_error_seguro():
+    conn, cur = fake_connection()
+    with (
+        patch("src.audit.psycopg.connect", return_value=conn),
+        patch.object(cur, "execute", side_effect=psycopg.OperationalError()),
+        pytest.raises(AuditError, match="días pendientes"),
+    ):
+        pending_days(DB, date(2026, 10, 14), DAY)
