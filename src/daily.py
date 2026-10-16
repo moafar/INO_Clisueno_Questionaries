@@ -1,6 +1,8 @@
 """Punto de entrada de la extracción diaria de cuestionarios MediCloud."""
 
+import argparse
 import json
+import os
 import logging
 import sys
 from datetime import UTC, datetime
@@ -10,6 +12,7 @@ from src.client import MedicloudAPIError, get_cuestionarios
 from src.config import load_settings
 from src.dates import previous_day
 from src.schema import compare_schema, load_reference
+from src.storage import StorageError, store_questionnaires
 from src.validation import QuestionnaireValidationError, validate_questionnaires
 
 
@@ -33,8 +36,8 @@ _json_handler = logging.StreamHandler(sys.stderr)
 _json_handler.setFormatter(JsonFormatter())
 
 
-def main() -> int:
-    """Extrae los cuestionarios del día anterior, sin persistirlos."""
+def main(dry_run: bool = False) -> int:
+    """Extrae y valida; persiste salvo cuando dry_run=True."""
     logger.setLevel(logging.INFO)
     if _json_handler not in logger.handlers:
         logger.addHandler(_json_handler)
@@ -64,18 +67,36 @@ def main() -> int:
                 report.inconsistent_records,
             )
 
+        if dry_run:
+            logger.info(
+                "Simulación completada sin persistencia. Fecha: %s. Registros: %d",
+                fecha,
+                len(cuestionarios),
+            )
+            return 0
+
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL no configurada")
+        inserted = store_questionnaires(database_url, cuestionarios)
         logger.info(
-            "Extracción y validación completadas. Fecha: %s. Registros recibidos: %d. "
-            "Persistencia: pendiente.",
+            "Persistencia confirmada. Fecha: %s. Recibidos: %d. Nuevos: %d",
             fecha,
             len(cuestionarios),
+            inserted,
         )
         return 0
 
-    except (ValueError, MedicloudAuthError, MedicloudAPIError, QuestionnaireValidationError):
+    except (ValueError, MedicloudAuthError, MedicloudAPIError, QuestionnaireValidationError, StorageError):
         logger.error("La extracción diaria ha fallado.")
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description="Extracción diaria MediCloud")
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Extrae y valida sin insertar datos en PostgreSQL",
+    )
+    args = parser.parse_args()
+    sys.exit(main(dry_run=args.dry_run))
