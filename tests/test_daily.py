@@ -890,9 +890,9 @@ def test_http_local_401_token_renovado_y_consulta_repetida_sin_postgres(
         def do_POST(self):
             if self.path == "/auth/getToken":
                 Handler.auth_requests += 1
+                token = f"token-{Handler.auth_requests}"
                 body = (
-                    '{"status":"success","access_token":"token-%d"}'
-                    % Handler.auth_requests
+                    f'{{"status":"success","access_token":"{token}"}}'
                 ).encode()
                 status = 200
             elif self.path == "/apisueno/getCuestionarioSueno":
