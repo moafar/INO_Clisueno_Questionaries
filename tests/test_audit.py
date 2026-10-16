@@ -11,6 +11,7 @@ from src.audit import (
     AuditError,
     ConcurrentExecutionError,
     batch_hash,
+    exclusive_day,
     exclusive_recovery,
     is_processed,
     pending_days,
@@ -277,3 +278,54 @@ def test_bloqueo_recuperacion_error_conexion_no_expone_detalles():
     ):
         pytest.fail("No debe entrar")
     assert "clave secreta" not in str(exc.value)
+
+
+def test_bloqueo_diario_usa_clave_negativa_y_se_libera():
+    day = date(2026, 10, 14)
+    conn, cur = fake_connection([(True,)])
+    with (
+        patch("src.audit.psycopg.connect", return_value=conn) as connect,
+        exclusive_day(DB, day),
+    ):
+        conn.close.assert_not_called()
+
+    sql, params = cur.execute.call_args.args
+    assert "pg_try_advisory_lock" in sql
+    assert params == (72482711, -day.toordinal())
+    assert connect.call_args.kwargs == {"autocommit": True}
+    conn.close.assert_called_once_with()
+
+
+def test_bloqueo_diario_ocupado_no_procesa_fecha():
+    conn, _ = fake_connection([(False,)])
+    with (
+        patch("src.audit.psycopg.connect", return_value=conn),
+        pytest.raises(ConcurrentExecutionError),
+        exclusive_day(DB, DAY),
+    ):
+        pytest.fail("La fecha ocupada no puede procesarse")
+    conn.close.assert_called_once_with()
+
+
+def test_bloqueo_diario_se_libera_tras_excepcion():
+    conn, _ = fake_connection([(True,)])
+    with (
+        patch("src.audit.psycopg.connect", return_value=conn),
+        pytest.raises(RuntimeError, match="simulado"),
+        exclusive_day(DB, DAY),
+    ):
+        raise RuntimeError("simulado")
+    conn.close.assert_called_once_with()
+
+
+def test_bloqueo_diario_oculta_error_de_conexion():
+    with (
+        patch(
+            "src.audit.psycopg.connect",
+            side_effect=psycopg.OperationalError("password secreto"),
+        ),
+        pytest.raises(AuditError, match="bloqueo diario") as exc,
+        exclusive_day(DB, DAY),
+    ):
+        pytest.fail("No debe entrar")
+    assert "password secreto" not in str(exc.value)
