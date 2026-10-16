@@ -183,9 +183,9 @@ python -m src.daily --start-date 2026-10-01 --end-date 2026-10-10 --dry-run
 python -m src.daily
 ```
 
-**Validación confirmada:** 103 pruebas superadas y Ruff sin errores. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
+**Validación confirmada previamente:** 127 pruebas superadas y Ruff sin errores antes de incorporar el bloqueo diario por fecha, que requiere una nueva validación WSL. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
 
-**Importante:** la nueva recuperación `--recover` aún requiere pruebas de WSL e integración local. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
+**Importante:** recuperación y bloqueo global ya validados en WSL y PostgreSQL local; el nuevo bloqueo por fecha aún requiere validación. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
 
 Las fechas se expresan como `YYYY-MM-DD`. No se admiten días posteriores a ayer en `America/Bogota`. Para intervalos, se requieren ambas fechas y `--date` no se puede combinar con ellas.
 
@@ -204,7 +204,7 @@ El modo `--recover` consulta `audit.load_control` para seleccionar, desde esa fe
 
 Se reutiliza el mismo procesamiento diario para validación, idempotencia y transacción conjunta cuestionarios+auditoría. Un bloqueo exclusivo de sesión PostgreSQL impide que dos ejecuciones `--recover` consulten y procesen fechas simultáneamente; se mantiene desde la selección de pendientes hasta terminar (o fallar) el último día. La conexión se cierra para liberar el bloqueo, incluso ante fallo del proceso. Esto complementa los bloqueos transaccionales diarios que protegen las inserciones. Las peticiones son de un solo día, dentro del límite de API.
 
-**Alcance del bloqueo:** protege frente a otras ejecuciones `--recover` del mismo proyecto. Los comandos manuales `--date`, los intervalos y la ejecución diaria no comparten ese bloqueo global; conservan la protección transaccional por fecha. Esta concurrencia mixta requiere validación operativa adicional.
+**Concurrencia mixta:** además del bloqueo global de `--recover`, cada ejecución normal (diaria, `--date`, intervalo o día de recuperación) adquiere un bloqueo exclusivo de sesión **por fecha** antes de comprobar la auditoría, autenticarse y consultar MediCloud; lo libera después de confirmar la persistencia o registrar el fallo. Se utiliza la clave negativa de la fecha en el mismo espacio de claves, separada de la clave positiva del bloqueo transaccional durante la escritura: ambas pueden coexistir en conexiones distintas. Si el día ya está en curso, se devuelve error sin consultar MediCloud ni crear un registro `failed` espurio. Otras fechas pueden procesarse en paralelo. `--dry-run` sigue sin acceder a PostgreSQL y por tanto **no adquiere este bloqueo**; las simulaciones simultáneas pueden repetir consultas sin persistir.
 
 No se permite combinar `--recover` con `--date`, `--start-date`, `--end-date` ni `--dry-run`. Esto último mantiene la garantía de que `--dry-run` no accede a PostgreSQL: identificar pendientes requiere leer auditoría. **No ejecutar todavía el comando de recuperación contra datos clínicos**, hasta confirmar las pruebas pendientes y la fecha inicial autorizada.
 
