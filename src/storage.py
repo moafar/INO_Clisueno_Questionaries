@@ -48,16 +48,8 @@ def _optional_text(record: dict, field: str) -> str | None:
     return value
 
 
-def store_questionnaires(database_url: str, records: list[dict]) -> int:
-    """Inserta todo el lote o nada.
-
-    Devuelve el número de filas nuevas; los duplicados exactos no se insertan.
-    Conflictos de hash y errores PostgreSQL provocan rollback.
-    No registra un día como procesado (eso corresponde al control de ejecuciones).
-    """
-    if not isinstance(database_url, str) or not database_url:
-        raise StorageError("No se ha configurado DATABASE_URL")
-
+def _prepare_questionnaires(records: list[dict]) -> list[tuple]:
+    """Valida y prepara todo el lote antes de realizar escrituras."""
     if not isinstance(records, list):
         raise StorageError("El lote debe ser una lista")
 
@@ -104,74 +96,98 @@ def store_questionnaires(database_url: str, records: list[dict]) -> int:
             )
         )
 
+    return prepared
+
+
+def _insert_prepared(cur: psycopg.Cursor, prepared: list[tuple]) -> int:
+    """Ejecuta inserciones; la transacción es responsabilidad del llamante."""
+    inserted = 0
+
+    for (
+        identifier,
+        parsed_date,
+        tipo,
+        documento,
+        sede,
+        record,
+        digest,
+    ) in prepared:
+        cur.execute(
+            """
+            INSERT INTO staging.clisueno_questionaries
+                (
+                    id,
+                    fecha,
+                    tipo_documento,
+                    documento,
+                    sede,
+                    datos,
+                    hash_contenido
+                )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+            """,
+            (
+                identifier,
+                parsed_date,
+                tipo,
+                documento,
+                sede,
+                Jsonb(record),
+                digest,
+            ),
+        )
+
+        if cur.fetchone() is not None:
+            inserted += 1
+            continue
+
+        cur.execute(
+            """
+            SELECT hash_contenido
+            FROM staging.clisueno_questionaries
+            WHERE id = %s
+            """,
+            (identifier,),
+        )
+
+        existing = cur.fetchone()
+
+        if existing is None or existing[0] != digest:
+            raise StorageConflictError(
+                "ID existente con contenido diferente o no verificable"
+            )
+
+    return inserted
+
+
+def store_questionnaires_in_transaction(
+    conn: psycopg.Connection, records: list[dict]
+) -> int:
+    """Inserta con una conexión existente, sin commit ni rollback propios.
+
+    El llamante debe controlar la transacción que incluye la auditoría.
+    """
+    prepared = _prepare_questionnaires(records)
+    try:
+        with conn.cursor() as cur:
+            return _insert_prepared(cur, prepared)
+    except psycopg.Error as exc:
+        raise StorageError("Error de persistencia PostgreSQL") from exc
+
+
+def store_questionnaires(database_url: str, records: list[dict]) -> int:
+    """API compatible: ejecuta una carga completa en su propia transacción."""
+    if not isinstance(database_url, str) or not database_url:
+        raise StorageError("No se ha configurado DATABASE_URL")
+    prepared = _prepare_questionnaires(records)
     try:
         with (
             psycopg.connect(database_url) as conn,
             conn.transaction(),
             conn.cursor() as cur,
         ):
-            inserted = 0
-
-            for (
-                identifier,
-                parsed_date,
-                tipo,
-                documento,
-                sede,
-                record,
-                digest,
-            ) in prepared:
-                cur.execute(
-                    """
-                    INSERT INTO staging.clisueno_questionaries
-                        (
-                            id,
-                            fecha,
-                            tipo_documento,
-                            documento,
-                            sede,
-                            datos,
-                            hash_contenido
-                        )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING
-                    RETURNING id
-                    """,
-                    (
-                        identifier,
-                        parsed_date,
-                        tipo,
-                        documento,
-                        sede,
-                        Jsonb(record),
-                        digest,
-                    ),
-                )
-
-                if cur.fetchone() is not None:
-                    inserted += 1
-                    continue
-
-                cur.execute(
-                    """
-                    SELECT hash_contenido
-                    FROM staging.clisueno_questionaries
-                    WHERE id = %s
-                    """,
-                    (identifier,),
-                )
-
-                existing = cur.fetchone()
-
-                if existing is None or existing[0] != digest:
-                    raise StorageConflictError(
-                        "ID existente con contenido diferente o no verificable"
-                    )
-
-        return inserted
-
-    except StorageConflictError:
-        raise
-
+            return _insert_prepared(cur, prepared)
     except psycopg.Error as exc:
         raise StorageError("Error de persistencia PostgreSQL") from exc
