@@ -202,7 +202,9 @@ python -m src.daily --recover
 
 El modo `--recover` consulta `audit.load_control` para seleccionar, desde esa fecha hasta ayer en `America/Bogota`, únicamente los días sin `success` para el pipeline y tabla de Clisueno. Los `failed` no completan un día. Un día exitoso con cero cuestionarios sí cuenta como completado. Procesa por orden cronológico y como máximo **7 fechas pendientes por ejecución**. Una ejecución posterior continúa desde los días que sigan pendientes; un error detiene el lote, sin deshacer éxitos anteriores.
 
-Se reutiliza el mismo procesamiento diario para validación, idempotencia, bloqueo y transacción conjunta cuestionarios+auditoría. Las peticiones son de un solo día, dentro del límite de API.
+Se reutiliza el mismo procesamiento diario para validación, idempotencia y transacción conjunta cuestionarios+auditoría. Un bloqueo exclusivo de sesión PostgreSQL impide que dos ejecuciones `--recover` consulten y procesen fechas simultáneamente; se mantiene desde la selección de pendientes hasta terminar (o fallar) el último día. La conexión se cierra para liberar el bloqueo, incluso ante fallo del proceso. Esto complementa los bloqueos transaccionales diarios que protegen las inserciones. Las peticiones son de un solo día, dentro del límite de API.
+
+**Alcance del bloqueo:** protege frente a otras ejecuciones `--recover` del mismo proyecto. Los comandos manuales `--date`, los intervalos y la ejecución diaria no comparten ese bloqueo global; conservan la protección transaccional por fecha. Esta concurrencia mixta requiere validación operativa adicional.
 
 No se permite combinar `--recover` con `--date`, `--start-date`, `--end-date` ni `--dry-run`. Esto último mantiene la garantía de que `--dry-run` no accede a PostgreSQL: identificar pendientes requiere leer auditoría. **No ejecutar todavía el comando de recuperación contra datos clínicos**, hasta confirmar las pruebas pendientes y la fecha inicial autorizada.
 
