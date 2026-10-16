@@ -20,6 +20,9 @@ en el servidor `mineriaino`.
 - Validación básica de las respuestas JSON.
 - Reintentos HTTP ante fallos transitorios.
 - Cálculo del día anterior en la zona horaria `America/Bogota`.
+- Ejecución manual por fecha (`--date`) y por intervalo inclusivo (`--start-date`, `--end-date`).
+- Persistencia idempotente en `staging.clisueno_questionaries` y auditoría compartida en `audit.load_control`.
+- Transacción por fecha y rollback ante conflictos de contenido.
 - Pruebas unitarias y de integración local.
 
 ### Validaciones realizadas
@@ -28,8 +31,9 @@ en el servidor `mineriaino`.
 - Extracción del 1 al 10 de octubre de 2026: 578 registros.
 - Campos identificados en esa respuesta: 179.
 - Extracción del 1 al 10 de septiembre de 2026: 599 registros.
-- Suite automatizada: 12 pruebas superadas.
-- Ruff: sin errores después de las correcciones.
+- Suite automatizada: 92 pruebas superadas (16-oct-2026), antes de la incorporación del intervalo manual.
+- Ruff: sin errores en dicha validación.
+- Integración con PostgreSQL local: lote vacío, intentos fallidos repetidos, transacción conjunta y rollback validados; tablas vacías después de limpiar.
 
 Estas cifras corresponden a las pruebas realizadas y no constituyen
 garantías sobre el volumen o esquema de futuras respuestas.
@@ -100,43 +104,20 @@ Persistencia PostgreSQL
 Auditoría de ejecución
 ```
 
-La persistencia y la auditoría todavía no están implementadas.
+La persistencia y la auditoría están implementadas en la rama de desarrollo y probadas en PostgreSQL local con registros ficticios. No se ha desplegado en producción.
 
-## 5. Estructura del proyecto
+## 5. Módulos principales
 
-```text
-clisueno_cuestionarios/
-├── src/
-│   ├── __init__.py
-│   ├── auth.py
-│   ├── client.py
-│   ├── config.py
-│   └── dates.py
-├── tests/
-│   ├── test_auth.py
-│   ├── test_client.py
-│   └── test_dates.py
-├── sql/
-├── docs/
-├── .env.example
-├── .gitignore
-├── requirements.txt
-├── README.md
-└── TODO.md
-```
-
-Funciones de los módulos:
-
-- `src/config.py`: lectura y validación de configuración.
-- `src/auth.py`: autenticación y reintentos HTTP.
-- `src/client.py`: extracción de cuestionarios.
-- `src/dates.py`: cálculo de fechas en zona horaria de Colombia.
+- `src/config.py`: configuración y credenciales desde variables de entorno.
+- `src/auth.py` y `src/client.py`: autenticación y consulta MediCloud.
+- `src/dates.py`: calendario `America/Bogota`.
+- `src/daily.py`: ejecución diaria, manual por fecha o intervalo.
+- `src/validation.py` y `src/schema.py`: validación de respuestas y detección de cambios de esquema.
+- `src/storage.py`: persistencia idempotente con control de conflictos.
+- `src/audit.py`: auditoría y transacción compartida por día.
 - `tests/`: pruebas automatizadas.
-- `sql/`: reservado para estructuras PostgreSQL.
-- `docs/`: reservado para documentación técnica.
-
-El punto de entrada `src/daily.py` está previsto, pero todavía
-no se considera implementado ni validado.
+- `sql/`: definición de tablas de cuestionarios para el entorno local.
+- `TODO.md`: estado verificable y prioridades actuales.
 
 ## 6. Entorno de desarrollo
 
@@ -148,7 +129,7 @@ no se considera implementado ni validado.
 
 **Python:** 3.12.3.
 
-**Control de versiones:** Git, rama `main`.
+**Control de versiones:** rama de desarrollo `feature/postgresql-storage`; `main` no incorpora todavía todos los cambios.
 
 ### 6.1. Instalar dependencias
 
@@ -170,10 +151,9 @@ Variables de MediCloud:
 - `MEDICLOUD_RESOURCE`
 - `MEDICLOUD_API_VERSION`
 
-Variables adicionales previstas:
+Variable de persistencia requerida en ejecución normal:
 
-- `DATABASE_URL`
-- `LOG_LEVEL`
+- `DATABASE_URL` (PostgreSQL; no se utiliza durante `--dry-run`).
 
 Las credenciales no deben incorporarse a Git, logs ni documentación.
 
@@ -184,38 +164,53 @@ python -m pytest tests/ -v
 python -m ruff check src tests
 ```
 
-## 7. Ejecución diaria prevista
+## 7. Ejecución manual y automática
 
-### 7.1. Frecuencia
+### 7.1. Ejecutar desde WSL
 
-- Ejecución diaria.
-- Horario: 03:00, `America/Bogota`.
-- Fecha de extracción: día calendario anterior.
+```bash
+# Simular el día anterior (sin acceso a PostgreSQL)
+python -m src.daily --dry-run
+
+# Simular una fecha concreta
+python -m src.daily --date 2026-10-10 --dry-run
+
+# Simular un intervalo inclusivo, día por día
+python -m src.daily --start-date 2026-10-01 --end-date 2026-10-10 --dry-run
+
+# Ejecución diaria con persistencia y auditoría (solo tras autorización operativa)
+python -m src.daily
+```
+
+**Importante:** la modalidad por intervalos está implementada en la rama de desarrollo, pero todavía requiere validar Ruff, pytest y un intervalo real con `--dry-run` en WSL. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
+
+Las fechas se expresan como `YYYY-MM-DD`. No se admiten días posteriores a ayer en `America/Bogota`. Para intervalos, se requieren ambas fechas y `--date` no se puede combinar con ellas.
+
+Cada fecha se consulta por separado, de modo que respeta el límite de la API de 10 días por petición. En modo normal, cada día confirma cuestionarios y auditoría en la misma transacción; los días con `success` anterior se omiten. Un fallo detiene el intervalo y no revierte las fechas ya confirmadas. En `--dry-run` no se consulta ni se modifica PostgreSQL.
+
+### 7.2. Frecuencia automática prevista
+
+- Frecuencia: diaria, a las 03:00, `America/Bogota`.
+- Fecha por defecto: día calendario anterior.
 - Programación futura mediante `systemd timer`.
+- **Pendiente:** detección y recuperación automática de días sin `success`, a partir de una fecha inicial de operación configurable.
 
-### 7.2. Requisitos operativos
+### 7.3. Requisitos operativos
 
 - Ejecución sin intervención humana.
 - Recuperación automática de días pendientes.
-- Prevención de registros duplicados.
-- Persistencia idempotente.
-- Auditoría de ejecuciones.
-- Control de concurrencia.
-- Registro estructurado de errores.
-- Recuperación ante interrupciones.
+- Prevención de duplicados e idempotencia.
+- Auditoría de ejecuciones y errores.
+- Control de concurrencia y recuperación ante interrupciones.
+- Logs estructurados sin datos identificables.
 
-### 7.3. Inmutabilidad
+### 7.4. Inmutabilidad
 
-Se adopta como requisito funcional que los cuestionarios registrados
-no se modifican posteriormente.
+Se adopta como supuesto funcional que los cuestionarios registrados no se modifican posteriormente. El `id` se asume globalmente único; un `id` ya almacenado con distinto hash provoca rollback. Este supuesto deberá revisarse si cambia MediCloud.
 
-Este supuesto deberá revisarse si cambia el comportamiento de MediCloud.
+### 7.5. Carga histórica
 
-### 7.4. Carga histórica
-
-La carga histórica se implementará en una fase posterior.
-
-La prioridad actual es completar la extracción diaria.
+La carga histórica automática sigue aplazada; un intervalo manual explícito no supone activar el reprocesamiento histórico desatendido.
 
 ## 8. Despliegue previsto
 
@@ -254,28 +249,18 @@ Requisitos:
 
 ## 10. Limitaciones actuales
 
-- No existe persistencia en PostgreSQL.
-- No existe control persistente de días procesados.
-- No existe auditoría de ejecuciones.
-- No hay recuperación implementada de días pendientes.
-- No existe temporizador systemd.
-- No hay tratamiento automático de un token expirado durante una consulta.
-- No se ha definido todavía el contrato completo de datos y sus tipos.
-- No se ha implementado la carga histórica.
+- No hay recuperación automática de fechas pendientes ni fecha inicial configurable de operación.
+- No se ha configurado `systemd` ni desplegado el proyecto en `mineriaino`.
+- La ejecución manual por intervalos aún requiere validación en WSL.
+- Está pendiente el manejo integral de un token expirado durante una consulta y las alertas operativas.
+- El significado y unicidad global del campo `id` son supuestos funcionales aún no contrastados externamente.
+- La carga histórica automática no está implementada.
 
-Consultar `TODO.md` para conocer las prioridades de desarrollo.
+Consultar `TODO.md` para conocer las prioridades y las pruebas confirmadas.
 
 ## 11. Control de versiones
 
-Repositorio Git independiente.
+Repositorio independiente: `moafar/INO_Clisueno_Questionaries`.
 
-Rama de trabajo: `main`.
-
-Commits registrados:
-
-- `b6d4b6c`: implementación inicial del extractor API.
-- `c442daa`: incorporación de reintentos HTTP y pruebas de integración.
-
-Los cambios posteriores a estos commits todavía deben incorporarse
-al control de versiones.
+Rama actual de desarrollo: `feature/postgresql-storage`. Los cambios aún no se han integrado en `main`.
 
