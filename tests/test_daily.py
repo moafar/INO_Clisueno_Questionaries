@@ -1,6 +1,7 @@
 """Pruebas del punto de entrada de la extracción diaria."""
 
 import argparse
+from contextlib import contextmanager
 from datetime import date
 from unittest.mock import call, patch
 
@@ -413,6 +414,7 @@ def test_recovery_procesa_solo_pendientes_en_orden():
     days = [date(2026, 10, 10), date(2026, 10, 12), date(2026, 10, 15)]
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": "2026-10-10",
             "DATABASE_URL": "postgresql://ficticio",
@@ -435,6 +437,7 @@ def test_recovery_interrumpe_en_primer_dia_fallido():
     days = [date(2026, 10, 10), date(2026, 10, 11), date(2026, 10, 12)]
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": "2026-10-10",
             "DATABASE_URL": "postgresql://ficticio",
@@ -452,6 +455,7 @@ def test_recovery_interrumpe_en_primer_dia_fallido():
 def test_recovery_sin_pendientes_no_consulta_medicloud():
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": "2026-10-10",
             "DATABASE_URL": "postgresql://ficticio",
@@ -478,6 +482,7 @@ def test_recovery_configuracion_invalida_nunca_consulta_auditoria(
 ):
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": start,
             "DATABASE_URL": database,
@@ -494,6 +499,7 @@ def test_recovery_configuracion_invalida_nunca_consulta_auditoria(
 def test_recovery_fallo_auditoria_no_ejecuta_dias():
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": "2026-10-10",
             "DATABASE_URL": "postgresql://ficticio",
@@ -512,6 +518,7 @@ def test_recovery_limite_siete_por_ejecucion():
     days = [date(2026, 10, 1) + timedelta(days=offset) for offset in range(7)]
     with (
         patch("src.daily.load_dotenv"),
+        patch("src.daily.exclusive_recovery"),
         patch.dict("os.environ", {
             "CLISUENO_START_DATE": "2026-10-01",
             "DATABASE_URL": "postgresql://ficticio",
@@ -549,3 +556,88 @@ def test_cli_recovery_solo_se_activa_explicitamente():
     with patch("src.daily.run_recovery", return_value=0) as recover:
         assert cli(["--recover"]) == 0
     recover.assert_called_once_with()
+
+
+def test_recovery_bloqueo_envuelve_consulta_y_procesamiento():
+    state = {"held": False}
+
+    @contextmanager
+    def lock(_url):
+        assert not state["held"]
+        state["held"] = True
+        try:
+            yield
+        finally:
+            state["held"] = False
+
+    def check_pending(*args, **kwargs):
+        assert state["held"]
+        return [date(2026, 10, 10)]
+
+    def process_day(*, target_date):
+        assert state["held"]
+        assert target_date == date(2026, 10, 10)
+        return 0
+
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.exclusive_recovery", side_effect=lock),
+        patch("src.daily.pending_days", side_effect=check_pending),
+        patch("src.daily.main", side_effect=process_day),
+    ):
+        assert run_recovery() == 0
+    assert not state["held"]
+
+
+def test_recovery_concurrente_se_rechaza_sin_consultar_ni_extraer(caplog):
+    from src.audit import ConcurrentExecutionError
+
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch(
+            "src.daily.exclusive_recovery",
+            side_effect=ConcurrentExecutionError("secreto"),
+        ),
+        patch("src.daily.pending_days") as fetch,
+        patch("src.daily.main") as process,
+    ):
+        assert run_recovery() == 1
+    fetch.assert_not_called()
+    process.assert_not_called()
+    assert "secreto" not in caplog.text
+
+
+def test_recovery_libera_bloqueo_tras_fallo():
+    state = {"held": False}
+
+    @contextmanager
+    def lock(_url):
+        state["held"] = True
+        try:
+            yield
+        finally:
+            state["held"] = False
+
+    with (
+        patch("src.daily.load_dotenv"),
+        patch.dict("os.environ", {
+            "CLISUENO_START_DATE": "2026-10-10",
+            "DATABASE_URL": "postgresql://ficticio",
+        }),
+        patch("src.daily.previous_day", return_value=date(2026, 10, 15)),
+        patch("src.daily.exclusive_recovery", side_effect=lock),
+        patch("src.daily.pending_days", return_value=[date(2026, 10, 10)]),
+        patch("src.daily.main", return_value=1),
+    ):
+        assert run_recovery() == 1
+    assert not state["held"]
