@@ -45,6 +45,13 @@ _json_handler = logging.StreamHandler(sys.stderr)
 _json_handler.setFormatter(JsonFormatter())
 
 
+def configure_logging() -> None:
+    """Instala el formateador JSON una sola vez."""
+    logger.setLevel(logging.INFO)
+    if _json_handler not in logger.handlers:
+        logger.addHandler(_json_handler)
+
+
 def parse_iso_date(value: str) -> date:
     """Acepta únicamente fechas ISO completas, YYYY-MM-DD."""
     try:
@@ -62,9 +69,7 @@ def parse_iso_date(value: str) -> date:
 
 def main(dry_run: bool = False, *, target_date: date | None = None) -> int:
     """Extrae y valida; en modo normal confirma carga y auditoría juntas."""
-    logger.setLevel(logging.INFO)
-    if _json_handler not in logger.handlers:
-        logger.addHandler(_json_handler)
+    configure_logging()
 
     started_at = datetime.now(UTC)
     load_id = new_load_id()
@@ -170,6 +175,7 @@ def run_date_range(
 
     Ante un fallo, conserva los éxitos anteriores y detiene el intervalo.
     """
+    configure_logging()
     if start_date > end_date:
         logger.error("Intervalo inválido: la fecha inicial supera la final.")
         return 1
