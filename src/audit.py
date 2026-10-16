@@ -173,6 +173,41 @@ def exclusive_recovery(database_url: str) -> Iterator[None]:
         conn.close()
 
 
+@contextmanager
+def exclusive_day(database_url: str, day: date) -> Iterator[None]:
+    """Protege toda la ejecución de una fecha, antes de consultar MediCloud.
+
+    La clave negativa distingue este bloqueo de sesión de los bloqueos
+    transaccionales positivos de persist_day; se usan conexiones distintas.
+    No bloquea otras fechas ni las recuperaciones globales.
+    """
+    try:
+        conn = psycopg.connect(database_url, autocommit=True)
+    except psycopg.Error as exc:
+        raise AuditError("Error conectando al bloqueo diario") from exc
+
+    try:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_try_advisory_lock(%s, %s)",
+                    (LOCK_NAMESPACE, -day.toordinal()),
+                )
+                acquired = cur.fetchone()[0]
+        except psycopg.Error as exc:
+            raise AuditError("Error solicitando bloqueo diario") from exc
+
+        if not acquired:
+            raise ConcurrentExecutionError(
+                "Otra ejecución está procesando esta fecha"
+            )
+
+        yield
+    finally:
+        # Cierra la sesión para soltar el bloqueo también ante un fallo.
+        conn.close()
+
+
 def persist_day(
     database_url: str,
     day: date,
