@@ -22,7 +22,7 @@ MediCloud API (HTTPS)
 - **Código:** `/opt/apps/etl/obsino/clisueno/cuestionarios`.
 - **Python:** 3.12.3; dependencias aisladas en `.venv`.
 - **Repositorio:** `moafar/INO_Clisueno_Questionaries`.
-- **Rama implantada:** `feature/postgresql-storage`; aún no integrada en `main`.
+- **Rama principal del repositorio:** `main`, integrada por fast-forward el 17-oct-2026 a partir de `feature/postgresql-storage`. El clon en `mineriaino` todavía está situado en la rama de desarrollo, con el mismo código de `v1.0.0`; pendiente cambiar el checkout operativo a `main`.
 - **Programación:** `clisueno_questionaries.timer`, diaria a las **03:00 `America/Bogota`**.
 - **Servicio:** `clisueno_questionaries.service`, ejecuta `python -m src.daily --recover`.
 - **Fecha inicial autorizada de recuperación:** `2026-10-01`.
@@ -156,7 +156,7 @@ Si falla, conservar la evidencia de `systemd` y auditoría **sin copiar datos cl
 ## 9. Pendientes y límites del MVP
 
 - **Pendiente para aceptación final:** comprobar la primera ejecución diaria real del temporizador el **18-oct-2026, 03:00 `America/Bogota`** y confirmar fecha nueva, auditoría y ausencia de errores.
-- Integrar `feature/postgresql-storage` en `main` cuando se cierre la aceptación; después sincronizar el clon del servidor.
+- La integración de `feature/postgresql-storage` en `main` ya se completó el 17-oct; queda cambiar el checkout del servidor a `main` y comprobar la primera ejecución automática.
 - La semántica global de `id` es un supuesto protegido contra colisiones, no una garantía de la API.
 - Alertas avanzadas, paneles Metabase, refactorización detallada de fallos HTTP y extracción histórica específica quedan en **Fase 2**.
 
