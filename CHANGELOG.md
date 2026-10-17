@@ -34,7 +34,7 @@ Registro de versiones y cambios operativos del extractor de cuestionarios de sue
 ### Pendiente para dar por aceptada la operación automática
 
 - Verificar **después de las 03:00 del 18-oct-2026 (Colombia)** la primera ejecución activada por el temporizador, su salida, una auditoría `success` para el 17-oct y la integridad de la carga.
-- Tras ese control, decidir la integración de `feature/postgresql-storage` en `main` y la sincronización del servidor.
+- **Integración en `main` completada el 17-oct-2026** mediante fast-forward. Queda cambiar el checkout de `mineriaino` a `main` y confirmar la aceptación tras la primera ejecución automática.
 
 ### Limitaciones y decisiones
 
