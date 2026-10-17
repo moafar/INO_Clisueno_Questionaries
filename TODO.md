@@ -35,7 +35,7 @@
 
 - [ ] **1.** **Crear la persistencia en `mineriaino`:** verificar la base `obsino` y el esquema `staging`; revisar/adaptar `sql/001_create_clisueno_questionaries.sql` (actualmente indica ejecución solo local), crear `staging.clisueno_questionaries` con sus columnas y restricciones y comprobar la compatibilidad de la tabla compartida `audit.load_control` y sus índices **sin modificar Labfp**. Verificar estructura y tabla vacía; registrar qué DDL se aplicó.
 - [ ] **2.** Preparar una identidad de ejecución y permisos mínimos para lectura/escritura en las tablas de Clisueno y los campos de auditoría necesarios, sin ampliar permisos de otros proyectos.
-- [ ] **3.** Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/Clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
+- [ ] **3.** Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
 - [ ] **4.** Configurar fuera de Git `DATABASE_URL`, credenciales MediCloud y `CLISUENO_START_DATE` (fecha inicial autorizada); restringir permisos de acceso a secretos y comprobar HTTPS y ausencia de información clínica en logs. Resolver únicamente fallos de seguridad que impidan operar.
 - [ ] **5.** Ejecutar en `mineriaino` una prueba manual `--dry-run` de una fecha cerrada: autenticar, extraer y validar **sin escribir cuestionarios ni auditoría**.
 - [ ] **6.** **Con autorización explícita para la primera carga clínica**, ejecutar una única fecha controlada en modo normal. Verificar filas, restricciones, hash, commit y `audit.load_control`; comprobar que no se imprimen credenciales ni datos identificables en logs.
@@ -84,7 +84,7 @@ No bloquear la implantación por refactorización de errores HTTP, métricas sof
 |---|---|
 | Desarrollo local | WSL Ubuntu + Python 3.12 |
 | Servidor objetivo | `mineriaino` |
-| Área de instalación | `/opt/apps/etl/obsino/Clisueno/` |
+| Área de instalación | `/opt/apps/etl/obsino/clisueno/` |
 | Base y tabla destino | `obsino.staging.clisueno_questionaries` |
 | Auditoría | Reutilizar `audit.load_control` sin alterar Labfp |
 | Ejecución | Diaria, 03:00 `America/Bogota`, autónoma |
