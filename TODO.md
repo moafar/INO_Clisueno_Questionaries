@@ -2,9 +2,9 @@
 
 **Repositorio:** `moafar/INO_Clisueno_Questionaries` · **Rama de desarrollo:** `feature/postgresql-storage` (`main` aún sin integrar).
 
-**Plan actualizado:** 17-oct-2026. El objetivo inmediato es **implantar un MVP operativo, autónomo y seguro en `mineriaino`**. Todo lo que no sea imprescindible para ponerlo en servicio pasa a la fase de evoluciones.
+**Plan actualizado:** 17-oct-2026. **Versión del MVP desplegada: `v1.0.0`** (marcador vacío en la raíz del repositorio). Se conserva una Fase 1 de implantación mínima y una Fase 2 de evoluciones.
 
-**Situación verificada hasta el 16-oct:** 141 pruebas superadas en WSL y Ruff sin errores; persistencia, transacciones, auditoría, rollback, recuperación y concurrencia probadas con datos ficticios en PostgreSQL local. **No hay carga clínica confirmada ni despliegue realizado en `mineriaino`.**
+**Situación al 17-oct:** repositorio instalado en `/opt/apps/etl/obsino/clisueno/cuestionarios`, Python 3.12.3, 141 pruebas superadas en `mineriaino` (6,25 s). PostgreSQL `obsino`: **925 cuestionarios** del **01 al 16-oct-2026**, **16 auditorías `success`**, **0 `failed`** y validación explícita de idempotencia. Servicio manual `clisueno_questionaries.service` verificado; `clisueno_questionaries.timer` **enabled / active (waiting)** para las **03:00 `America/Bogota`**. **Pendiente comprobar la primera ejecución automática prevista para el 18-oct-2026 y cerrar la aceptación operativa.**
 
 **Decisión de alcance:** mantener el tratamiento genérico de errores HTTP y los reintentos limitados ya existentes. No introducir por ahora una nueva taxonomía de errores. La extracción histórica y las mejoras avanzadas se aplazan.
 
@@ -19,32 +19,33 @@
 - [x] Ejecución diaria mediante `src/daily.py`, opciones `--date`, `--start-date`, `--end-date` y `--dry-run`.
 - [x] Validación mínima de datos (`id`, `fecha`, estructura, unicidad por lote, intervalo); rechazo completo del lote inválido.
 - [x] Detección no bloqueante de cambios de nombres de campos respecto de la referencia de 179 campos.
-- [x] Persistencia idempotente en `staging.clisueno_questionaries`, con SHA-256, transacciones y rollback; validada **solo en PostgreSQL local**.
+- [x] Persistencia idempotente en `staging.clisueno_questionaries`, con SHA-256, transacciones y rollback: probada con datos ficticios localmente y con cargas reales en `mineriaino`.
 - [x] Integración transaccional con `audit.load_control`; resultados `success` y `failed`, cantidades y fechas de ejecución.
 - [x] Recuperación explícita `--recover` de días sin éxito, en orden y con máximo de siete fechas por ejecución.
 - [x] Bloqueos por día y para la recuperación, con liberación ante interrupciones; pruebas concurrentes con PostgreSQL local.
 - [x] Reintentos HTTP acotados, tratamiento genérico de fallos y renovación única del token ante 401; 403 sin renovación.
 - [x] Logging JSON con mensajes de error controlados y pruebas de no exposición de detalles sensibles.
-- [x] Pruebas de componentes e integración locales: **141 passed** y Ruff correcto (16-oct-2026).
+- [x] Pruebas de componentes e integración: **141 passed** y Ruff correcto en WSL (16-oct); **141 passed in 6.25s** en `mineriaino` (17-oct).
 
 **Decisión funcional vigente:** se utiliza `id` como identificador global de cuestionario, aunque su unicidad global no está confirmada externamente. Una colisión con contenido diferente causa error y rollback, en vez de sobrescribir información. Mantener esa salvaguarda para el MVP.
 
-### 1.2. Implantación del MVP en `mineriaino` — secuencia obligatoria
+### 1.2. Implantación del MVP en `mineriaino` — estado al 17-oct-2026
 
-**La primera actividad de implantación es crear y verificar la persistencia en `mineriaino`. No iniciar por `systemd`, cron ni una carga real.**
+La **primera actividad de implantación fue la creación y verificación de la persistencia PostgreSQL en `mineriaino`**, antes de instalar o ejecutar el servicio. No se alteraron las tablas existentes de Labfp.
 
-- [ ] **1.** **Crear la persistencia en `mineriaino`:** verificar la base `obsino` y el esquema `staging`; revisar/adaptar `sql/001_create_clisueno_questionaries.sql` (actualmente indica ejecución solo local), crear `staging.clisueno_questionaries` con sus columnas y restricciones y comprobar la compatibilidad de la tabla compartida `audit.load_control` y sus índices **sin modificar Labfp**. Verificar estructura y tabla vacía; registrar qué DDL se aplicó.
-- [ ] **2.** Preparar una identidad de ejecución y permisos mínimos para lectura/escritura en las tablas de Clisueno y los campos de auditoría necesarios, sin ampliar permisos de otros proyectos.
-- [ ] **3.** Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
-- [ ] **4.** Configurar fuera de Git `DATABASE_URL`, credenciales MediCloud y `CLISUENO_START_DATE` (fecha inicial autorizada); restringir permisos de acceso a secretos y comprobar HTTPS y ausencia de información clínica en logs. Resolver únicamente fallos de seguridad que impidan operar.
-- [ ] **5.** Ejecutar en `mineriaino` una prueba manual `--dry-run` de una fecha cerrada: autenticar, extraer y validar **sin escribir cuestionarios ni auditoría**.
-- [ ] **6.** **Con autorización explícita para la primera carga clínica**, ejecutar una única fecha controlada en modo normal. Verificar filas, restricciones, hash, commit y `audit.load_control`; comprobar que no se imprimen credenciales ni datos identificables en logs.
-- [ ] **7.** Repetir esa fecha para verificar que no duplica cuestionarios; comprobar una recuperación controlada y que los días `success` se omiten. Detener el despliegue si falla la consistencia.
-- [ ] **8.** Configurar servicio y temporizador `systemd` para ejecución autónoma diaria a las **03:00 `America/Bogota`**. Usar la recuperación ya implementada (`--recover`), inicio histórico autorizado y ejecución compensatoria de temporizadores perdidos; evitar procesos simultáneos.
-- [ ] **9.** Verificar la primera ejecución programada, la auditoría, los logs y la capacidad de recuperar una interrupción sin intervención humana.
-- [ ] **10.** Documentar instalación, configuración, operación y reversión mínima en `README_server.md` y cambios efectivos en `CHANGELOG_server.md`; tras la aceptación, integrar la rama de desarrollo en `main`.
+- [x] **1. Persistencia:** en `obsino` se comprobó `staging` y se creó `staging.clisueno_questionaries` mediante DDL revisado de `sql/001_create_clisueno_questionaries.sql`, con 8 columnas, PK, tres restricciones CHECK y comentarios; se verificó vacía inicialmente. `audit.load_control` ya existía: se verificaron columnas e índices y se confirmó compatibilidad sin modificarla. El SQL del repositorio conserva un comentario inicial que limita su ejecución al entorno local; el DDL equivalente se aplicó manualmente en el servidor.
+- [x] **2. Usuario y permisos:** servicio configurado con `User=rom` y `Group=ops`; comprobados `SELECT`/`INSERT` para las dos tablas. Se usa PostgreSQL local con `DATABASE_URL=postgresql:///obsino`. No se creó un rol exclusivo: evaluar endurecimiento de privilegios tras el MVP si procede.
+- [x] **3. Instalación:** código clonado en `/opt/apps/etl/obsino/clisueno/cuestionarios`, rama `feature/postgresql-storage`; Python 3.12.3, `.venv`, dependencias instaladas y 141 pruebas satisfactorias. No se modificaron proyectos de Labfp ni de Investigaciones.
+- [x] **4. Configuración:** credenciales MediCloud en `.env` del servidor (sin secretos en Git), permisos `600 rom:ops`, exclusión confirmada por `.gitignore`; `CLISUENO_START_DATE=2026-10-01`. Conectividad real con MediCloud y PostgreSQL verificada. No incluir valores de secretos en la documentación.
+- [x] **5. Simulación real:** `--date 2026-10-10 --dry-run`: 57 registros, validación correcta, sin persistencia.
+- [x] **6. Primera carga clínica autorizada:** `--date 2026-10-01`: 58 recibidos y 58 persistidos; 58 identificadores distintos; una auditoría `success`, `rows_read=rows_loaded=58`.
+- [x] **7. Idempotencia y recuperación:** segunda ejecución del 1-oct omitida (`Fecha ya procesada`), manteniendo 58 registros y una sola auditoría; tres ejecuciones explícitas `--recover` procesaron del 2 al 16-oct (máximo siete días por ejecución). Comprobación final: **925 cuestionarios**, **16 `success`**, **0 `failed`**.
+- [x] **8. Servicio y temporizador:** creados en `/etc/systemd/system/` los archivos `clisueno_questionaries.service` (`Type=oneshot`, usuario `rom`, `ExecStart` con `--recover`) y `clisueno_questionaries.timer` (`OnCalendar=*-*-* 03:00:00 America/Bogota`, `Persistent=true`). `systemd-analyze verify` sin errores; prueba manual del servicio informó «No hay días pendientes de recuperación». Timer `enabled` y `active (waiting)`.
+- [ ] **9. Primera ejecución automática:** verificar el **18-oct-2026** después de las 03:00 Colombia: estado de la unidad, `journalctl`, fecha 17-oct con `success`, conteos coherentes y ausencia de datos clínicos en los logs. El comportamiento ante fallo e interrupción se ha probado localmente, **no mediante una interrupción deliberada en producción**.
+- [x] **10. Documentación/versionado:** actualizar `README.md` y crear `CHANGELOG.md` y archivo vacío `v1.0.0` en la rama de desarrollo (17-oct). Los archivos de unidad `systemd` están instalados en el servidor, no versionados como plantillas.
+- [ ] **11. Cierre de implantación:** tras la primera ejecución automática satisfactoria, confirmar aceptación operativa y decidir integración de `feature/postgresql-storage` en `main`; sincronizar el clon de `mineriaino` antes de cualquier cambio ulterior.
 
-**Condiciones de aceptación del MVP:** ejecución autónoma diaria; datos persistidos íntegramente sin duplicados; día `success` solo después del commit; días fallidos recuperables; secretos fuera del repositorio; logs sin información clínica identificable; otros proyectos de `mineriaino` intactos. No activar el temporizador hasta superar las comprobaciones anteriores.
+**Criterios de aceptación:** extracción autónoma diaria; persistencia y auditoría transaccionales sin duplicados; recuperación de días pendientes; credenciales fuera de Git; ausencia de datos identificables en logs; ningún impacto sobre otros proyectos. Las pruebas manuales y las cargas iniciales están superadas; la **aceptación final requiere la primera ejecución programada**.
 
 ### 1.3. Deliberadamente fuera del MVP
 
@@ -84,14 +85,14 @@ No bloquear la implantación por refactorización de errores HTTP, métricas sof
 |---|---|
 | Desarrollo local | WSL Ubuntu + Python 3.12 |
 | Servidor objetivo | `mineriaino` |
-| Área de instalación | `/opt/apps/etl/obsino/clisueno/` |
+| Área de instalación | `/opt/apps/etl/obsino/clisueno/cuestionarios/` |
 | Base y tabla destino | `obsino.staging.clisueno_questionaries` |
 | Auditoría | Reutilizar `audit.load_control` sin alterar Labfp |
 | Ejecución | Diaria, 03:00 `America/Bogota`, autónoma |
 | Fechas | Día anterior y recuperación desde fecha de inicio autorizada |
 | Identidad de cuestionario | `id` global asumido; conflicto de hash protegido |
 | Tratamiento HTTP | Genérico, reintentos acotados, renovación única ante 401 |
-| Persistencia clínica | Todavía no realizada |
+| Persistencia clínica | 925 cuestionarios y 16 días auditados (01–16 oct 2026) en `mineriaino` |
 | Extracción histórica específica | Fase 2 |
 
 **Restricciones:** nunca versionar credenciales; nunca escribir información clínica identificable en logs; no confirmar éxitos antes del commit; no permitir cargas parciales inconsistentes ni duplicados; no alterar proyectos ajenos; conservar pruebas de los componentes críticos y documentar cambios de producción.
