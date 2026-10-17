@@ -1,6 +1,6 @@
 # TODO — Clisueno Cuestionarios
 
-**Repositorio:** `moafar/INO_Clisueno_Questionaries` · **Rama de desarrollo:** `feature/postgresql-storage` (`main` aún sin integrar).
+**Repositorio:** `moafar/INO_Clisueno_Questionaries` · **Rama principal:** `main`, con `v1.0.0` integrado mediante fast-forward el 17-oct-2026. Clon de `mineriaino` aún situado en `feature/postgresql-storage` (mismo código del MVP).
 
 **Plan actualizado:** 17-oct-2026. **Versión del MVP desplegada: `v1.0.0`** (marcador vacío en la raíz del repositorio). Se conserva una Fase 1 de implantación mínima y una Fase 2 de evoluciones.
 
@@ -43,7 +43,7 @@ La **primera actividad de implantación fue la creación y verificación de la p
 - [x] **8. Servicio y temporizador:** creados en `/etc/systemd/system/` los archivos `clisueno_questionaries.service` (`Type=oneshot`, usuario `rom`, `ExecStart` con `--recover`) y `clisueno_questionaries.timer` (`OnCalendar=*-*-* 03:00:00 America/Bogota`, `Persistent=true`). `systemd-analyze verify` sin errores; prueba manual del servicio informó «No hay días pendientes de recuperación». Timer `enabled` y `active (waiting)`.
 - [ ] **9. Primera ejecución automática:** verificar el **18-oct-2026** después de las 03:00 Colombia: estado de la unidad, `journalctl`, fecha 17-oct con `success`, conteos coherentes y ausencia de datos clínicos en los logs. El comportamiento ante fallo e interrupción se ha probado localmente, **no mediante una interrupción deliberada en producción**.
 - [x] **10. Documentación/versionado:** actualizar `README.md` y crear `CHANGELOG.md` y archivo vacío `v1.0.0` en la rama de desarrollo (17-oct). Los archivos de unidad `systemd` están instalados en el servidor, no versionados como plantillas.
-- [ ] **11. Cierre de implantación:** tras la primera ejecución automática satisfactoria, confirmar aceptación operativa y decidir integración de `feature/postgresql-storage` en `main`; sincronizar el clon de `mineriaino` antes de cualquier cambio ulterior.
+- [ ] **11. Cierre de implantación:** la integración de `feature/postgresql-storage` en `main` ya se completó el 17-oct-2026. Cambiar el checkout de `mineriaino` a `main` sin alterar la versión instalada; tras la primera ejecución automática satisfactoria, confirmar aceptación operativa.
 
 **Criterios de aceptación:** extracción autónoma diaria; persistencia y auditoría transaccionales sin duplicados; recuperación de días pendientes; credenciales fuera de Git; ausencia de datos identificables en logs; ningún impacto sobre otros proyectos. Las pruebas manuales y las cargas iniciales están superadas; la **aceptación final requiere la primera ejecución programada**.
 
