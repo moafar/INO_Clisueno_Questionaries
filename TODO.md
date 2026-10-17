@@ -1,229 +1,106 @@
 # TODO — Clisueno Cuestionarios
 
-## Estado general
+**Repositorio:** `moafar/INO_Clisueno_Questionaries` · **Rama de desarrollo:** `feature/postgresql-storage` (`main` aún sin integrar).
 
-**Proyecto:** extractor desatendido de cuestionarios de sueño MediCloud.
+**Plan actualizado:** 17-oct-2026. El objetivo inmediato es **implantar un MVP operativo, autónomo y seguro en `mineriaino`**. Todo lo que no sea imprescindible para ponerlo en servicio pasa a la fase de evoluciones.
 
-**Estado:** desarrollo local en WSL; persistencia y auditoría transaccional verificadas con datos ficticios en PostgreSQL local. No se han cargado cuestionarios clínicos.
+**Situación verificada hasta el 16-oct:** 141 pruebas superadas en WSL y Ruff sin errores; persistencia, transacciones, auditoría, rollback, recuperación y concurrencia probadas con datos ficticios en PostgreSQL local. **No hay carga clínica confirmada ni despliegue realizado en `mineriaino`.**
 
-**Rama Git:** `feature/postgresql-storage` (trabajo en curso, `main` sin integrar).
-
-**Pruebas:** 141 superadas en WSL (5,87 s) y Ruff sin errores (16-oct-2026). PostgreSQL local: rollback y reanudación con datos ficticios, bloques de concurrencia global/diario y prueba de dos procesos con API simulada superadas; tablas verificadas vacías.
-
-**Prioridad actual:** revisar manejo de errores HTTP recuperables/permanentes y protección de credenciales y logs; luego observabilidad, alertas y despliegue antes de autorizar cargas clínicas o activar `systemd`. La renovación por HTTP 401 ya está validada.
-
-La extracción histórica queda aplazada.
+**Decisión de alcance:** mantener el tratamiento genérico de errores HTTP y los reintentos limitados ya existentes. No introducir por ahora una nueva taxonomía de errores. La extracción histórica y las mejoras avanzadas se aplazan.
 
 ---
 
-## 1. Componentes implementados
+## FASE 1 — MVP: desarrollo mínimo e implantación
 
-- [x] Inicializar repositorio Git independiente.
-- [x] Crear entorno virtual Python 3.12.
-- [x] Configurar `.gitignore`.
-- [x] Crear plantilla `.env.example`.
-- [x] Implementar carga y validación de configuración.
-- [x] Implementar autenticación mediante Bearer Token.
-- [x] Implementar consulta de cuestionarios por fechas.
-- [x] Validar estructura básica de respuestas JSON.
-- [x] Implementar reintentos HTTP en autenticación.
-- [x] Implementar reintentos HTTP en extracción.
-- [x] Validar reintentos mediante servidores HTTP locales.
-- [x] Implementar cálculo del día anterior en `America/Bogota`.
-- [x] Ejecutar 24 pruebas automatizadas satisfactoriamente (hasta logging JSON).
-- [x] Validar código mediante Ruff.
-- [x] Crear documentación inicial en `README.md`.
+### 1.1. Desarrollo requerido para el MVP — ya implementado y validado localmente
 
-## 2. Prioridad alta — Extracción diaria
+- [x] Repositorio independiente, entorno Python 3.12, configuración por variables de entorno y `.gitignore`.
+- [x] Autenticación MediCloud y extracción por fecha; cálculo del día anterior con `America/Bogota`.
+- [x] Ejecución diaria mediante `src/daily.py`, opciones `--date`, `--start-date`, `--end-date` y `--dry-run`.
+- [x] Validación mínima de datos (`id`, `fecha`, estructura, unicidad por lote, intervalo); rechazo completo del lote inválido.
+- [x] Detección no bloqueante de cambios de nombres de campos respecto de la referencia de 179 campos.
+- [x] Persistencia idempotente en `staging.clisueno_questionaries`, con SHA-256, transacciones y rollback; validada **solo en PostgreSQL local**.
+- [x] Integración transaccional con `audit.load_control`; resultados `success` y `failed`, cantidades y fechas de ejecución.
+- [x] Recuperación explícita `--recover` de días sin éxito, en orden y con máximo de siete fechas por ejecución.
+- [x] Bloqueos por día y para la recuperación, con liberación ante interrupciones; pruebas concurrentes con PostgreSQL local.
+- [x] Reintentos HTTP acotados, tratamiento genérico de fallos y renovación única del token ante 401; 403 sin renovación.
+- [x] Logging JSON con mensajes de error controlados y pruebas de no exposición de detalles sensibles.
+- [x] Pruebas de componentes e integración locales: **141 passed** y Ruff correcto (16-oct-2026).
 
-### 2.1. Punto de entrada
+**Decisión funcional vigente:** se utiliza `id` como identificador global de cuestionario, aunque su unicidad global no está confirmada externamente. Una colisión con contenido diferente causa error y rollback, en vez de sobrescribir información. Mantener esa salvaguarda para el MVP.
 
-- [x] Crear `src/daily.py`.
-- [x] Integrar configuración, autenticación y extracción.
-- [x] Integrar validación del lote en `src/daily.py` (pruebas locales superadas).
-- [x] Ejecutar extracción real del día anterior en Colombia (2026-10-14: 59 cuestionarios recibidos y validados, sin persistencia).
-- [x] Incorporar logging estructurado.
-- [x] Devolver códigos de salida adecuados.
-- [x] Evitar exposición de información sensible en logs.
-- [x] Crear pruebas automatizadas del proceso diario.
-- [x] Implementar `--date` y validar extracción real `2026-10-10` en `--dry-run` (57 cuestionarios; 0 escrituras confirmadas).
-- [x] Validar `--start-date`/`--end-date` en WSL: 103 pruebas superadas, Ruff sin errores y `--dry-run` real para 2026-10-09 y 2026-10-10 (58 + 57 registros); PostgreSQL local quedó vacío.
+### 1.2. Implantación del MVP en `mineriaino` — secuencia obligatoria
 
-**Criterio de aceptación:**
+**La primera actividad de implantación es crear y verificar la persistencia en `mineriaino`. No iniciar por `systemd`, cron ni una carga real.**
 
-El proceso determina el día anterior en Colombia, solicita los
-cuestionarios y gestiona correctamente los errores sin intervención
-humana.
+1. - [ ] **Crear la persistencia en `mineriaino`:** verificar la base `obsino` y el esquema `staging`; revisar/adaptar `sql/001_create_clisueno_questionaries.sql` (actualmente indica ejecución solo local), crear `staging.clisueno_questionaries` con sus columnas y restricciones y comprobar la compatibilidad de la tabla compartida `audit.load_control` y sus índices **sin modificar Labfp**. Verificar estructura y tabla vacía; registrar qué DDL se aplicó.
+2. - [ ] Preparar una identidad de ejecución y permisos mínimos para lectura/escritura en las tablas de Clisueno y los campos de auditoría necesarios, sin ampliar permisos de otros proyectos.
+3. - [ ] Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/Clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
+4. - [ ] Configurar fuera de Git `DATABASE_URL`, credenciales MediCloud y `CLISUENO_START_DATE` (fecha inicial autorizada); restringir permisos de acceso a secretos y comprobar HTTPS y ausencia de información clínica en logs. Resolver únicamente fallos de seguridad que impidan operar.
+5. - [ ] Ejecutar en `mineriaino` una prueba manual `--dry-run` de una fecha cerrada: autenticar, extraer y validar **sin escribir cuestionarios ni auditoría**.
+6. - [ ] **Con autorización explícita para la primera carga clínica**, ejecutar una única fecha controlada en modo normal. Verificar filas, restricciones, hash, commit y `audit.load_control`; comprobar que no se imprimen credenciales ni datos identificables en logs.
+7. - [ ] Repetir esa fecha para verificar que no duplica cuestionarios; comprobar una recuperación controlada y que los días `success` se omiten. Detener el despliegue si falla la consistencia.
+8. - [ ] Configurar servicio y temporizador `systemd` para ejecución autónoma diaria a las **03:00 `America/Bogota`**. Usar la recuperación ya implementada (`--recover`), inicio histórico autorizado y ejecución compensatoria de temporizadores perdidos; evitar procesos simultáneos.
+9. - [ ] Verificar la primera ejecución programada, la auditoría, los logs y la capacidad de recuperar una interrupción sin intervención humana.
+10. - [ ] Documentar instalación, configuración, operación y reversión mínima en `README_server.md` y cambios efectivos en `CHANGELOG_server.md`; tras la aceptación, integrar la rama de desarrollo en `main`.
 
-La ejecución no se considerará una carga exitosa hasta completar
-la persistencia y las validaciones correspondientes.
+**Condiciones de aceptación del MVP:** ejecución autónoma diaria; datos persistidos íntegramente sin duplicados; día `success` solo después del commit; días fallidos recuperables; secretos fuera del repositorio; logs sin información clínica identificable; otros proyectos de `mineriaino` intactos. No activar el temporizador hasta superar las comprobaciones anteriores.
 
-### 2.2. Validación de datos
+### 1.3. Deliberadamente fuera del MVP
 
-- [x] Implementar contrato mínimo de estructura de la API en `src/validation.py` (pruebas locales superadas).
-- [x] Definir `id` y `fecha` como obligatorios en el contrato mínimo.
-- [ ] Determinar el significado y alcance del campo `id`.
-- [x] Validar unicidad por lote y ausencia de identificadores nulos.
-- [x] Validar fechas de los cuestionarios dentro del intervalo solicitado.
-- [x] Rechazar el lote completo si algún registro incumple el contrato mínimo.
-- [x] Implementar detección y aviso de deriva de esquema en `src/schema.py` y `src/daily.py` (verificado en la ejecución local).
-- [x] Crear `tests/test_validation.py` y validar el contrato mínimo.
+No bloquear la implantación por refactorización de errores HTTP, métricas sofisticadas, alertas avanzadas, dashboards, estudio histórico completo ni optimizaciones no exigidas por fallos reales. Corregir solo defectos que comprometan integridad, seguridad o funcionamiento autónomo básico.
 
-**Criterio de aceptación:**
+---
 
-Los registros se validan antes de incorporarse a PostgreSQL.
-Las respuestas incompletas o inconsistentes no se marcan
-silenciosamente como cargas satisfactorias.
+## FASE 2 — Evoluciones posteriores al MVP
 
-### 2.3. Persistencia PostgreSQL
+### 2.1. Resiliencia y seguridad ampliadas
 
-- [x] Definir destino local `obsino.staging.clisueno_questionaries`.
-- [x] Definir tipos de datos y restricciones; estructura verificada en PostgreSQL local.
-- [x] Adoptar `id` como clave única global por decisión funcional; una colisión con hash diferente genera error y rollback.
-- [x] Crear `sql/001_create_clisueno_questionaries.sql`; DDL de tabla ejecutado y restricciones verificadas en `obsino` local (los COMMENT de la migración no se han confirmado como ejecutados).
-- [x] Comprobar conexión `psycopg` en WSL mediante `DATABASE_URL` a PostgreSQL local.
-- [x] Implementar inserciones idempotentes y validar dos ejecuciones con datos ficticios en PostgreSQL local.
-- [x] Incorporar transacciones y almacenamiento reutilizable dentro de transacción externa; validación conjunta con auditoría superada en PostgreSQL local.
-- [x] Verificar rollback ante conflicto de hash con datos ficticios en PostgreSQL local.
-- [x] Añadir pruebas de persistencia e integración; transacción conjunta y rollback confirmados en PostgreSQL local.
+- [ ] Valorar clasificación explícita de errores HTTP recuperables y permanentes **solo si la experiencia operativa lo justifica**.
+- [ ] Revisar y optimizar límites de reintentos, `Retry-After`, tiempos máximos de espera y tratamiento de redirecciones.
+- [ ] Ampliar pruebas de respuestas JSON inesperadas, fallos de red y recuperación prolongada.
+- [ ] Profundizar en auditoría de secretos y logs, política de rotación de credenciales y endurecimiento de configuración.
 
-**Criterio de aceptación:**
+### 2.2. Observabilidad y explotación
 
-Una misma extracción puede ejecutarse repetidamente sin producir
-cuestionarios duplicados ni cargas parciales inconsistentes.
+- [ ] Incorporar indicadores de duración, latencia, volumen y tendencias operativas.
+- [ ] Definir alertas automáticas ante fallos persistentes o retrasos de extracción.
+- [ ] Preparar integración con Metabase u otra herramienta de seguimiento.
+- [ ] Evaluar controles adicionales de deriva de esquema y calidad de datos.
 
-Se conservan múltiples cuestionarios del mismo paciente.
+### 2.3. Evolución funcional y mantenimiento
 
-### 2.4. Control de ejecuciones y recuperación
+- [ ] Confirmar con MediCloud el significado y la unicidad global del campo `id`; adaptar modelo solo si la evidencia lo exige.
+- [ ] Evaluar separación de dependencias de desarrollo y producción y automatización de despliegues.
+- [ ] Definir el alcance y fecha inicial de una **extracción histórica** específica.
+- [ ] Implementar la carga histórica en intervalos permitidos por la API (máximo de 10 días), con seguimiento, reanudación, validación, idempotencia y convivencia con la extracción diaria.
+- [ ] Revisar escalabilidad, retención y requisitos adicionales según el volumen real.
 
-- [x] Adoptar `audit.load_control` como control de fechas por `pipeline_name`, día y estado `success`; réplica de su DDL e índices creada en PostgreSQL local, sin alterar producción.
-- [x] Registrar ejecuciones correctas y fallidas en `audit.load_control`; reintentos fallidos repetidos probados.
-- [x] Registrar cantidades recibidas y persistidas (`rows_read`, `rows_loaded`).
-- [x] Implementar consulta de días sin `success` específico de Clisueno, acotada a 7 fechas por ejecución; SQL probado en PostgreSQL local.
-- [x] Implementar `--recover` explícito desde `CLISUENO_START_DATE` hasta ayer según `America/Bogota`, cronológico y con parada por fallo; comprobado mediante pruebas simuladas con PostgreSQL local, sin consultar MediCloud. Activación operativa pendiente.
-- [x] Impedir marcar un día como completado antes del commit; rollback conjunto comprobado.
-- [x] Considerar `success` una respuesta válida sin cuestionarios (`rows_read = rows_loaded = 0`), igual que en Labfp; probado.
-- [x] Validar 120 pruebas en WSL y las consultas de recuperación en PostgreSQL local; simulación de interrupción por error y reanudación superada, con limpieza confirmada.
-- [x] Validar en WSL y PostgreSQL local el bloqueo exclusivo de sesión para recuperaciones simultáneas: segunda ejecución rechazada y nueva ejecución admitida tras liberar el bloqueo; 127 pruebas automatizadas y Ruff superados.
-- [x] Comprobar con PostgreSQL local que un bloqueo exclusivo de sesión se libera tras `SIGKILL` del proceso auxiliar y puede adquirirse de nuevo sin intervención humana.
-- [x] Probar en PostgreSQL local interrupción de una transacción de escritura con `SIGKILL`: inserción ficticia y auditoría `success` no confirmadas fueron revertidas, y se liberó el bloqueo transaccional. Posteriormente, `persist_day()` pudo confirmar el día y un segundo intento lo omitió sin duplicados; registros ficticios eliminados.
-- [x] Validar bloqueo por fecha anterior a la consulta MediCloud: 134 pruebas automatizadas y Ruff superados; PostgreSQL local rechaza segunda ejecución de igual fecha, permite fechas distintas y libera el bloqueo al terminar. Probada coexistencia con el bloqueo global de recuperación; `--dry-run` no accede a PostgreSQL ni adquiere bloqueo.
-- [x] Probar dos procesos Python reales ejecutando `main()` para la misma fecha con bloqueos PostgreSQL reales y llamadas MediCloud/persistencia simuladas: el segundo devolvió error antes de entrar en la API simulada; el primero finalizó y no se escribieron filas. No equivale a una prueba contra la API real ni a un despliegue.
+---
 
-**Criterio de aceptación:**
-
-Si el extractor permanece inactivo varios días, recupera los
-períodos pendientes sin duplicar registros.
-
-Los días sin datos pueden registrarse como procesados correctamente
-cuando la API responde de manera válida.
-
-## 3. Prioridad alta — Seguridad y resiliencia
-
-- [x] Validar en WSL la renovación controlada del Bearer Token ante HTTP 401: token nuevo y una sola repetición de consulta; segundo 401 o fallo de renovación detiene la fecha con `AUTH_ERROR`. HTTP 403 no renueva y detiene con `API_ERROR`. Suite de 141 pruebas superada, incluyendo mocks e integración con servidor HTTP local; Ruff sin errores.
-- [ ] Diferenciar errores recuperables y permanentes.
-- [ ] Revisar los límites de reintentos y tiempos de espera.
-- [ ] Evitar reintentos indefinidos.
-- [x] Validar bloqueos global y diario, con pruebas automatizadas y pruebas reales de adquisición, contención y liberación en PostgreSQL local.
-- [x] Validar con dos procesos Python independientes y API simulada que la contención diaria impide llamadas redundantes antes de extraer; PostgreSQL local real, sin escrituras.
-- [ ] Garantizar que los logs no contienen datos clínicos.
-- [ ] Garantizar que las excepciones no exponen credenciales.
-- [ ] Revisar tratamiento de respuestas JSON inesperadas.
-- [ ] Solicitar rotación de credenciales antes de producción.
-
-**Criterio de aceptación:**
-
-La aplicación puede recuperarse de fallos transitorios, termina
-de forma controlada ante fallos persistentes y protege los secretos.
-
-## 4. Prioridad media — Auditoría y observabilidad
-
-- [x] Reutilizar la estructura de producción de `audit.load_control` (réplica local creada y cuatro índices confirmados).
-- [x] Decidir integración de Clisueno con `audit.load_control`, sin alterar los flujos de Labfp.
-- [x] Registrar `started_at` y `finished_at` de los intentos auditados (`success` y `failed`).
-- [ ] Registrar duración y estado final.
-- [x] Registrar cantidades leídas y cargadas en `audit.load_control`.
-- [x] Incorporar `load_id` UUID por intento.
-- [x] Diferenciar categorías de fallo para API, validación y PostgreSQL, sin volcar datos clínicos en la auditoría.
-- [ ] Definir alertas ante fallos persistentes.
-- [ ] Preparar integración con Metabase.
-
-**Criterio de aceptación:**
-
-Es posible determinar qué día se procesó, cuándo se procesó,
-qué resultado obtuvo y si requiere recuperación.
-
-## 5. Prioridad media — Despliegue en mineriaino
-
-- [ ] Revisar la estructura definitiva de `Clisueno`.
-- [ ] Preparar instalación reproducible.
-- [ ] Separar dependencias de producción y desarrollo.
-- [ ] Configurar credenciales fuera del repositorio.
-- [ ] Definir permisos y usuario de ejecución.
-- [ ] Configurar servicio `systemd`.
-- [ ] Configurar temporizador diario a las 03:00.
-- [ ] Utilizar zona horaria `America/Bogota`.
-- [ ] Configurar recuperación de ejecuciones programadas perdidas.
-- [ ] Definir política de logs.
-- [ ] Verificar conectividad HTTPS con MediCloud.
-- [ ] Probar ejecución manual controlada.
-- [ ] Validar ejecución programada.
-- [ ] Actualizar `README_server.md`.
-- [ ] Actualizar `CHANGELOG_server.md`.
-
-**Criterio de aceptación:**
-
-El extractor se ejecuta automáticamente en `mineriaino`,
-persiste los datos y se recupera correctamente de interrupciones.
-
-No requiere sesiones SSH ni intervención de un operador
-para su funcionamiento ordinario.
-
-## 6. Prioridad posterior — Extracción histórica
-
-- [ ] Definir fecha de inicio histórica.
-- [ ] Implementar partición temporal de consultas.
-- [ ] Respetar el límite de 10 días de la API.
-- [ ] Incorporar controles de progreso.
-- [ ] Permitir reanudación de cargas interrumpidas.
-- [ ] Reutilizar validación y persistencia de la extracción diaria.
-- [ ] Evitar duplicados entre cargas históricas y diarias.
-- [ ] Incorporar pruebas de carga histórica.
-
-La carga histórica no forma parte del alcance inmediato.
-
-## 7. Decisiones arquitectónicas
+## Decisiones y restricciones transversales
 
 | Decisión | Estado |
 |---|---|
-| Desarrollo local en Ubuntu WSL | Confirmada |
-| Python 3.12 | Confirmada |
-| Repositorio Git independiente | Confirmada |
-| Desarrollo en rama `feature/postgresql-storage` | En curso, pendiente de integrar en `main` |
-| Servidor de ejecución `mineriaino` | Confirmada |
-| Ejecución sin supervisión | Confirmada |
-| Frecuencia diaria | Confirmada |
-| Horario 03:00 America/Bogota | Confirmada |
-| Extracción del día anterior | Confirmada |
-| PostgreSQL como destino | Confirmada |
-| Cuestionarios inmutables | Supuesto funcional |
-| Clave única de cuestionario | `id` asumido globalmente único; conflictos protegidos con SHA-256 |
-| Tabla PostgreSQL de destino | Creada y verificada en `obsino` local |
-| Control de días pendientes | `--recover` validado mediante mocks y PostgreSQL local; activación futura mediante `systemd` y salvaguardas pendientes |
-| Carga histórica | Aplazada |
+| Desarrollo local | WSL Ubuntu + Python 3.12 |
+| Servidor objetivo | `mineriaino` |
+| Área de instalación | `/opt/apps/etl/obsino/Clisueno/` |
+| Base y tabla destino | `obsino.staging.clisueno_questionaries` |
+| Auditoría | Reutilizar `audit.load_control` sin alterar Labfp |
+| Ejecución | Diaria, 03:00 `America/Bogota`, autónoma |
+| Fechas | Día anterior y recuperación desde fecha de inicio autorizada |
+| Identidad de cuestionario | `id` global asumido; conflicto de hash protegido |
+| Tratamiento HTTP | Genérico, reintentos acotados, renovación única ante 401 |
+| Persistencia clínica | Todavía no realizada |
+| Extracción histórica específica | Fase 2 |
 
-## 8. Requisitos no negociables
+**Restricciones:** nunca versionar credenciales; nunca escribir información clínica identificable en logs; no confirmar éxitos antes del commit; no permitir cargas parciales inconsistentes ni duplicados; no alterar proyectos ajenos; conservar pruebas de los componentes críticos y documentar cambios de producción.
 
-1. No almacenar credenciales en Git.
-2. No registrar información clínica identificable en logs.
-3. No considerar una carga exitosa antes de confirmar la persistencia.
-4. No generar cuestionarios duplicados al repetir ejecuciones.
-5. No depender de intervención humana para recuperar fallos ordinarios.
-6. No modificar otros proyectos del servidor durante el despliegue.
-7. Mantener pruebas automatizadas para los componentes críticos.
-8. Documentar cambios operativos realizados en producción.
+## Anexo — Registro de validaciones previo a la replanificación
 
-## 9. Punto de control — 16-oct-2026
+Este registro es **histórico**, no una lista vigente de trabajo. Los pasos y prioridades actuales son los de la **FASE 1** anterior.
+
+### Bitácora de pruebas locales — 16-oct-2026 (histórico)
 
 - Rama de desarrollo: `feature/postgresql-storage` (`main` sin integrar); no se ha tocado producción.
 - **Validación WSL:** 84 pruebas superadas en 5,24 s; Ruff sin errores.
@@ -252,8 +129,4 @@ La carga histórica no forma parte del alcance inmediato.
 - **Prueba de concurrencia con dos procesos reales completada:** `main()` del primer proceso mantuvo `exclusive_day()` durante una API simulada pausada; el segundo `main()` devolvió 1 sin entrar en la API. El primero terminó con 0; ambas tablas permanecieron vacías. Se usó PostgreSQL local real con mocks de MediCloud y persistencia. Sin escrituras ni acceso a producción.
 - **Renovación controlada validada en WSL:** `src.client` distingue HTTP 401 mediante `MedicloudUnauthorizedError`. `src.daily.main()` adquiere un nuevo token y repite una única vez la solicitud, sin bucles; registra `AUTH_ERROR` si falla la renovación o persiste el 401. HTTP 403 y otros errores API no renuevan token. Pruebas unitarias y con servidor HTTP local aprobadas sin PostgreSQL ni MediCloud.
 - **Última validación WSL (16-oct-2026):** Ruff sin errores tras corrección `UP031` en `tests/test_daily.py`; `python -m pytest tests/ -q`: **141 passed in 5.87s**. Corrección de estilo publicada en GitHub, commit `d7a3c66`, rama `feature/postgresql-storage`.
-- **Pendientes prioritarios:** revisar otros fallos HTTP, límites de reintentos, protección de secretos y logs, alertas y despliegue autónomo. La API real y la persistencia clínica siguen sin ejecutarse con esta nueva lógica.
 - La unicidad global de `id` permanece como supuesto funcional; no se ha verificado externamente.
-- No ejecutar carga clínica real ni despliegue en `mineriaino` hasta completar las salvaguardas y pruebas pendientes.
-- **Punto seguro de suspensión:** actualización de este TODO en remoto; realizar `git pull --ff-only origin feature/postgresql-storage` y comprobar `git status --short --branch` limpio antes de suspender.
-- **Al retomar:** revisar el tratamiento de errores HTTP recuperables/permanentes y la protección de secretos sin consultar MediCloud ni cargar datos clínicos.
