@@ -33,16 +33,16 @@
 
 **La primera actividad de implantación es crear y verificar la persistencia en `mineriaino`. No iniciar por `systemd`, cron ni una carga real.**
 
-1. - [ ] **Crear la persistencia en `mineriaino`:** verificar la base `obsino` y el esquema `staging`; revisar/adaptar `sql/001_create_clisueno_questionaries.sql` (actualmente indica ejecución solo local), crear `staging.clisueno_questionaries` con sus columnas y restricciones y comprobar la compatibilidad de la tabla compartida `audit.load_control` y sus índices **sin modificar Labfp**. Verificar estructura y tabla vacía; registrar qué DDL se aplicó.
-2. - [ ] Preparar una identidad de ejecución y permisos mínimos para lectura/escritura en las tablas de Clisueno y los campos de auditoría necesarios, sin ampliar permisos de otros proyectos.
-3. - [ ] Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/Clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
-4. - [ ] Configurar fuera de Git `DATABASE_URL`, credenciales MediCloud y `CLISUENO_START_DATE` (fecha inicial autorizada); restringir permisos de acceso a secretos y comprobar HTTPS y ausencia de información clínica en logs. Resolver únicamente fallos de seguridad que impidan operar.
-5. - [ ] Ejecutar en `mineriaino` una prueba manual `--dry-run` de una fecha cerrada: autenticar, extraer y validar **sin escribir cuestionarios ni auditoría**.
-6. - [ ] **Con autorización explícita para la primera carga clínica**, ejecutar una única fecha controlada en modo normal. Verificar filas, restricciones, hash, commit y `audit.load_control`; comprobar que no se imprimen credenciales ni datos identificables en logs.
-7. - [ ] Repetir esa fecha para verificar que no duplica cuestionarios; comprobar una recuperación controlada y que los días `success` se omiten. Detener el despliegue si falla la consistencia.
-8. - [ ] Configurar servicio y temporizador `systemd` para ejecución autónoma diaria a las **03:00 `America/Bogota`**. Usar la recuperación ya implementada (`--recover`), inicio histórico autorizado y ejecución compensatoria de temporizadores perdidos; evitar procesos simultáneos.
-9. - [ ] Verificar la primera ejecución programada, la auditoría, los logs y la capacidad de recuperar una interrupción sin intervención humana.
-10. - [ ] Documentar instalación, configuración, operación y reversión mínima en `README_server.md` y cambios efectivos en `CHANGELOG_server.md`; tras la aceptación, integrar la rama de desarrollo en `main`.
+- [ ] **1.** **Crear la persistencia en `mineriaino`:** verificar la base `obsino` y el esquema `staging`; revisar/adaptar `sql/001_create_clisueno_questionaries.sql` (actualmente indica ejecución solo local), crear `staging.clisueno_questionaries` con sus columnas y restricciones y comprobar la compatibilidad de la tabla compartida `audit.load_control` y sus índices **sin modificar Labfp**. Verificar estructura y tabla vacía; registrar qué DDL se aplicó.
+- [ ] **2.** Preparar una identidad de ejecución y permisos mínimos para lectura/escritura en las tablas de Clisueno y los campos de auditoría necesarios, sin ampliar permisos de otros proyectos.
+- [ ] **3.** Instalar el repositorio y dependencias en el área `/opt/apps/etl/obsino/Clisueno/`, sin reutilizar `medicloud_extract` ni intervenir Labfp/Investigaciones.
+- [ ] **4.** Configurar fuera de Git `DATABASE_URL`, credenciales MediCloud y `CLISUENO_START_DATE` (fecha inicial autorizada); restringir permisos de acceso a secretos y comprobar HTTPS y ausencia de información clínica en logs. Resolver únicamente fallos de seguridad que impidan operar.
+- [ ] **5.** Ejecutar en `mineriaino` una prueba manual `--dry-run` de una fecha cerrada: autenticar, extraer y validar **sin escribir cuestionarios ni auditoría**.
+- [ ] **6.** **Con autorización explícita para la primera carga clínica**, ejecutar una única fecha controlada en modo normal. Verificar filas, restricciones, hash, commit y `audit.load_control`; comprobar que no se imprimen credenciales ni datos identificables en logs.
+- [ ] **7.** Repetir esa fecha para verificar que no duplica cuestionarios; comprobar una recuperación controlada y que los días `success` se omiten. Detener el despliegue si falla la consistencia.
+- [ ] **8.** Configurar servicio y temporizador `systemd` para ejecución autónoma diaria a las **03:00 `America/Bogota`**. Usar la recuperación ya implementada (`--recover`), inicio histórico autorizado y ejecución compensatoria de temporizadores perdidos; evitar procesos simultáneos.
+- [ ] **9.** Verificar la primera ejecución programada, la auditoría, los logs y la capacidad de recuperar una interrupción sin intervención humana.
+- [ ] **10.** Documentar instalación, configuración, operación y reversión mínima en `README_server.md` y cambios efectivos en `CHANGELOG_server.md`; tras la aceptación, integrar la rama de desarrollo en `main`.
 
 **Condiciones de aceptación del MVP:** ejecución autónoma diaria; datos persistidos íntegramente sin duplicados; día `success` solo después del commit; días fallidos recuperables; secretos fuera del repositorio; logs sin información clínica identificable; otros proyectos de `mineriaino` intactos. No activar el temporizador hasta superar las comprobaciones anteriores.
 
