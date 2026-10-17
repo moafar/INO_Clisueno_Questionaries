@@ -1,303 +1,163 @@
-# Clisueno — Extractor de cuestionarios MediCloud
+# Clisueno — Extractor de cuestionarios de sueño MediCloud
 
-## 1. Propósito
+**Versión desplegada:** `v1.0.0` · **Actualizado:** 17 de octubre de 2026  
+**Estado:** MVP instalado y funcionando en `mineriaino` (carga manual y recuperación verificadas). **Pendiente verificar la primera ejecución automática del temporizador, prevista para el 18 de octubre de 2026 a las 03:00, hora de Colombia.**
 
-Aplicación Python para extraer automáticamente los cuestionarios de sueño
-registrados en MediCloud y almacenarlos en PostgreSQL del Observatorio INO.
+La versión actual se identifica mediante un **archivo vacío y sin extensión en la raíz del repositorio llamado `v1.0.0`**. El archivo es un marcador visible, no un ejecutable ni una etiqueta Git: al publicar una versión posterior se sustituirá el marcador anterior, se actualizarán este README y `CHANGELOG.md`, y se coordinará el despliegue.
 
-El sistema está diseñado desde el inicio para ejecutarse sin supervisión
-en el servidor `mineriaino`.
+## 1. Propósito y funcionamiento
 
-## 2. Estado del proyecto
+Extraer cuestionarios de sueño desde MediCloud y almacenarlos en PostgreSQL del Observatorio INO, con validación, idempotencia, auditoría y recuperación automática de días pendientes.
 
-**Estado: en desarrollo. No desplegado en producción.**
+```text
+MediCloud API (HTTPS)
+    -> autenticación Bearer Token
+    -> extracción de un día por petición
+    -> validación del lote y alerta de deriva de esquema
+    -> PostgreSQL: cuestionarios + auditoría en una transacción
+    -> reanudación de días sin éxito
+```
 
-### Funcionalidades implementadas
+- **Servidor:** `mineriaino`.
+- **Código:** `/opt/apps/etl/obsino/clisueno/cuestionarios`.
+- **Python:** 3.12.3; dependencias aisladas en `.venv`.
+- **Repositorio:** `moafar/INO_Clisueno_Questionaries`.
+- **Rama implantada:** `feature/postgresql-storage`; aún no integrada en `main`.
+- **Programación:** `clisueno_questionaries.timer`, diaria a las **03:00 `America/Bogota`**.
+- **Servicio:** `clisueno_questionaries.service`, ejecuta `python -m src.daily --recover`.
+- **Fecha inicial autorizada de recuperación:** `2026-10-01`.
 
-- Lectura y validación de configuración mediante variables de entorno.
-- Autenticación contra la API MediCloud mediante Bearer Token.
-- Extracción de cuestionarios por intervalo de fechas.
-- Validación básica de las respuestas JSON.
-- Reintentos HTTP ante fallos transitorios.
-- Cálculo del día anterior en la zona horaria `America/Bogota`.
-- Ejecución manual por fecha (`--date`) y por intervalo inclusivo (`--start-date`, `--end-date`).
-- Persistencia idempotente en `staging.clisueno_questionaries` y auditoría compartida en `audit.load_control`.
-- Transacción por fecha y rollback ante conflictos de contenido.
-- Pruebas unitarias y de integración local.
+## 2. Estado verificable en producción (17-oct-2026)
 
-### Validaciones realizadas
+| Verificación | Resultado |
+|---|---|
+| Pruebas automáticas en `mineriaino` | **141 passed in 6.25s** |
+| Conexión API real (`--dry-run` del 10-oct) | 57 registros validados, sin escritura |
+| Primera carga controlada (01-oct) | 58 recibidos, 58 persistidos |
+| Repetición del 01-oct | Omitida por día ya procesado |
+| Recuperación `--recover` | 02–16 oct, en lotes de hasta 7 días |
+| Total en `staging.clisueno_questionaries` | **925 cuestionarios** (01–16 oct) |
+| Auditoría de Clisueno en `audit.load_control` | **16 `success`**, **0 `failed`** |
+| Prueba manual del servicio `systemd` | Correcta: «No hay días pendientes de recuperación» |
+| Temporizador | `enabled` y `active (waiting)` |
+| Primera ejecución programada | **Pendiente comprobar: 18-oct, 03:00 Colombia** |
 
-- Autenticación real desde Python: correcta.
-- Extracción del 1 al 10 de octubre de 2026: 578 registros.
-- Campos identificados en esa respuesta: 179.
-- Extracción del 1 al 10 de septiembre de 2026: 599 registros.
-- Suite automatizada: 92 pruebas superadas (16-oct-2026), antes de la incorporación del intervalo manual.
-- Ruff: sin errores en dicha validación.
-- Integración con PostgreSQL local: lote vacío, intentos fallidos repetidos, transacción conjunta y rollback validados; tablas vacías después de limpiar.
-
-Estas cifras corresponden a las pruebas realizadas y no constituyen
-garantías sobre el volumen o esquema de futuras respuestas.
+Las pruebas de rollback, liberación de bloqueos por interrupción y contención concurrente se realizaron previamente con datos ficticios en PostgreSQL local. **No se ha simulado una interrupción deliberada del servidor de producción.** Las cifras anteriores corresponden al momento de verificación y cambiarán con nuevas extracciones.
 
 ## 3. API MediCloud
 
-**Servidor:** `https://nm.medicloud.com.co`
+- **Servidor:** `https://nm.medicloud.com.co`.
+- **Autenticación:** `POST /auth/getToken`; encabezados `App_Id`, `App_Key`, `Resource` y `ApiVersion`. La respuesta aporta el token.
+- **Extracción:** `POST /apisueno/getCuestionarioSueno`, autenticación `Authorization: Bearer <token>`, cuerpo `application/x-www-form-urlencoded` con `fechaInicial` y `fechaFinal` (`YYYY-MM-DD`).
+- **Respuesta:** objeto JSON `status=success` con `datos` (lista de cuestionarios).
+- La API permite un intervalo de hasta 10 días de diferencia; la ejecución diaria y la recuperación consultan **una sola fecha por solicitud**.
+- HTTP 401 en extracción: renovar token y repetir la petición una vez. HTTP 403: detener sin renovar. HTTP 429 y 5xx incluidos en los reintentos limitados actuales; otros errores se gestionan de forma genérica.
 
-### 3.1. Autenticación
+## 4. Persistencia y auditoría
 
-**Endpoint:** `POST /auth/getToken`
+**Base:** `obsino` · **Esquema y tabla:** `staging.clisueno_questionaries`.
 
-Cabeceras:
+Columnas: `id` (PK `BIGINT`), `fecha` (`DATE`), `tipo_documento`, `documento`, `sede` (`TEXT`), `datos` (`JSONB`), `hash_contenido` (`CHAR(64)`) y `created_at` (`TIMESTAMPTZ`). Se verificaron restricciones sobre `id`, JSONB y hash.
 
-- `App_Id`
-- `App_Key`
-- `Resource`
-- `ApiVersion`
+**Auditoría:** `audit.load_control`, tabla compartida ya existente. No se modificó su estructura ni la de otros proyectos. Cada fecha exitosa registra el volumen leído/cargado y se confirma en la **misma transacción** que los cuestionarios. Los fallos se registran por intento cuando es posible.
 
-La respuesta contiene:
+La clave `id` se **asume globalmente única**, sin confirmación externa de MediCloud. Si un `id` existente presenta contenido distinto, el proceso rechaza la colisión con rollback; no sobrescribe datos. Un día con auditoría `success` no vuelve a extraerse; una respuesta válida con cero registros puede considerarse éxito.
 
-- `status`
-- `token_type`
-- `access_token`
+**Implantación del esquema:** primero se creó manualmente la tabla de cuestionarios en `mineriaino` con el DDL revisado de `sql/001_create_clisueno_questionaries.sql` y sus `COMMENT`; después se verificó que `audit.load_control` existente cumplía el contrato. El archivo SQL conserva un comentario de ejecución limitada al entorno local: **no ejecutarlo indiscriminadamente en producción**.
 
-### 3.2. Extracción de cuestionarios
+## 5. Configuración y seguridad
 
-**Endpoint:** `POST /apisueno/getCuestionarioSueno`
+El archivo `.env` **no se versiona**. En el servidor está protegido con permisos `600`, propietario `rom`. Su exclusión está comprobada con `git check-ignore -v .env`.
 
-Autenticación:
+Variables necesarias:
 
-```http
-Authorization: Bearer <token>
-```
+| Variable | Uso |
+|---|---|
+| `MEDICLOUD_BASE_URL` | URL HTTPS base de MediCloud |
+| `MEDICLOUD_APP_ID`, `MEDICLOUD_APP_KEY` | Identificación y secreto de aplicación |
+| `MEDICLOUD_RESOURCE`, `MEDICLOUD_API_VERSION` | Parámetros de autenticación |
+| `DATABASE_URL` | Conexión PostgreSQL; en `mineriaino`, `postgresql:///obsino` |
+| `CLISUENO_START_DATE` | Fecha inicial de `--recover`; en producción, `2026-10-01` |
 
-Cuerpo de la petición: `application/x-www-form-urlencoded`.
+El proceso se ejecuta como `rom` con grupo `ops`, y se verificó acceso `SELECT`/`INSERT` sobre ambas tablas. La conexión local a PostgreSQL emplea socket Unix sin contraseña en `.env`.
 
-Parámetros:
+No pegar tokens, claves ni el contenido completo de `.env` en incidencias, commits o logs. El proyecto trata datos clínicos identificables; los logs previstos incluyen información operativa y conteos, **no el contenido de los cuestionarios**. Profundizar la revisión de seguridad y políticas de permisos/rotación es una posible evolución posterior.
 
-- `fechaInicial`: YYYY-MM-DD
-- `fechaFinal`: YYYY-MM-DD
+## 6. Ejecución
 
-La documentación establece una diferencia máxima de 10 días.
-
-La respuesta es un objeto JSON con los campos:
-
-- `status`
-- `datos`: arreglo de cuestionarios.
-
-## 4. Arquitectura prevista
-
-```text
-API MediCloud
-    |
-    v
-Autenticación automática
-    |
-    v
-Extracción por fechas
-    |
-    v
-Validación de registros
-    |
-    v
-Persistencia PostgreSQL
-    |
-    v
-Auditoría de ejecución
-```
-
-La persistencia y la auditoría están implementadas en la rama de desarrollo y probadas en PostgreSQL local con registros ficticios. No se ha desplegado en producción.
-
-## 5. Módulos principales
-
-- `src/config.py`: configuración y credenciales desde variables de entorno.
-- `src/auth.py` y `src/client.py`: autenticación y consulta MediCloud.
-- `src/dates.py`: calendario `America/Bogota`.
-- `src/daily.py`: ejecución diaria, manual por fecha o intervalo y recuperación explícita de pendientes (en validación).
-- `src/audit.py`: selección de días sin `success`, auditoría y transacción compartida por día.
-- `src/validation.py` y `src/schema.py`: validación de respuestas y detección de cambios de esquema.
-- `src/storage.py`: persistencia idempotente con control de conflictos.
-- `tests/`: pruebas automatizadas.
-- `sql/`: definición de tablas de cuestionarios para el entorno local.
-- `TODO.md`: estado verificable y prioridades actuales.
-
-## 6. Entorno de desarrollo
-
-**Sistema:** Ubuntu WSL.
-
-**Directorio local:**
-
-`/home/rom/obsino/clisueno_cuestionarios`
-
-**Python:** 3.12.3.
-
-**Control de versiones:** rama de desarrollo `feature/postgresql-storage`; `main` no incorpora todavía todos los cambios.
-
-### 6.1. Instalar dependencias
+Desde `/opt/apps/etl/obsino/clisueno/cuestionarios`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+# Validar una fecha sin ninguna escritura en PostgreSQL
+.venv/bin/python -m src.daily --date 2026-10-10 --dry-run
+
+# Ejecutar una fecha con persistencia y auditoría
+.venv/bin/python -m src.daily --date AAAA-MM-DD
+
+# Ejecutar un intervalo inclusivo (una fecha por petición)
+.venv/bin/python -m src.daily --start-date AAAA-MM-DD --end-date AAAA-MM-DD
+
+# Procesar hasta 7 fechas pendientes desde CLISUENO_START_DATE
+.venv/bin/python -m src.daily --recover
+
+# Ejecutar la suite local
+.venv/bin/python -m pytest tests/ -q
 ```
 
-### 6.2. Configuración
+**Atención:** los comandos que no incluyen `--dry-run` escriben datos clínicos en PostgreSQL; su uso debe ser autorizado. `--recover` no acepta `--dry-run` ni otras opciones de selección de fecha. No se pueden procesar fechas posteriores a ayer según `America/Bogota`.
 
-Crear `.env` a partir de `.env.example`.
+La recuperación selecciona cronológicamente los días que **no tienen `success`**, con un **máximo de 7 fechas por invocación**. Los éxitos anteriores se conservan ante un fallo posterior. Los bloqueos PostgreSQL evitan dos recuperaciones simultáneas y dos ejecuciones de una misma fecha. Tras un período de inactividad superior a siete días, pueden hacer falta varias invocaciones para ponerse al día.
 
-Variables de MediCloud:
+## 7. Operación autónoma con systemd
 
-- `MEDICLOUD_BASE_URL`
-- `MEDICLOUD_APP_ID`
-- `MEDICLOUD_APP_KEY`
-- `MEDICLOUD_RESOURCE`
-- `MEDICLOUD_API_VERSION`
+Las unidades están instaladas directamente en `/etc/systemd/system/` del servidor:
 
-Variable de persistencia requerida en ejecución normal:
+- `clisueno_questionaries.service`: `Type=oneshot`, `User=rom`, `Group=ops`, `WorkingDirectory=/opt/apps/etl/obsino/clisueno/cuestionarios`, `ExecStart=/opt/apps/etl/obsino/clisueno/cuestionarios/.venv/bin/python -m src.daily --recover`, `TimeoutStartSec=30min`, `UMask=0077`, `NoNewPrivileges=true`; tras `network-online.target`.
+- `clisueno_questionaries.timer`: `OnCalendar=*-*-* 03:00:00 America/Bogota`, `Persistent=true`, `Unit=clisueno_questionaries.service`; habilitado para arrancar con el servidor.
 
-- `DATABASE_URL` (PostgreSQL; no se utiliza durante `--dry-run`).
-- `CLISUENO_START_DATE` (obligatoria únicamente con `--recover`; formato `YYYY-MM-DD`; determina el primer día que se puede recuperar).
-
-Las credenciales no deben incorporarse a Git, logs ni documentación.
-
-### 6.3. Ejecutar pruebas
+**Comprobaciones operativas sin nueva carga:**
 
 ```bash
-python -m pytest tests/ -v
-python -m ruff check src tests
+systemctl status clisueno_questionaries.timer --no-pager -l
+systemctl status clisueno_questionaries.service --no-pager -l
+journalctl -u clisueno_questionaries.service --since today --no-pager
+systemctl list-timers clisueno_questionaries.timer --no-pager
 ```
 
-## 7. Ejecución manual y automática
+Un servicio `oneshot` terminado correctamente puede aparecer como `inactive (dead)`; revisar el resultado de ejecución y los registros, no solo el estado `Active`.
 
-### 7.1. Ejecutar desde WSL
+**Control básico posterior a la próxima ejecución:**
 
-```bash
-# Simular el día anterior (sin acceso a PostgreSQL)
-python -m src.daily --dry-run
-
-# Simular una fecha concreta
-python -m src.daily --date 2026-10-10 --dry-run
-
-# Simular un intervalo inclusivo, día por día
-python -m src.daily --start-date 2026-10-01 --end-date 2026-10-10 --dry-run
-
-# Ejecución diaria con persistencia y auditoría (solo tras autorización operativa)
-python -m src.daily
+```sql
+SELECT source_start_date, status, rows_read, rows_loaded, finished_at
+FROM audit.load_control
+WHERE pipeline_name = 'clisueno_questionaries_daily'
+ORDER BY source_start_date DESC
+LIMIT 5;
 ```
 
-**Validación confirmada previamente:** 134 pruebas superadas en WSL y Ruff sin errores, además de pruebas de concurrencia y recuperación con PostgreSQL local. La renovación de token introducida posteriormente aún requiere pruebas en WSL. Extracción manual con `--dry-run` para 2026-10-09 (58) y 2026-10-10 (57), sin escrituras; ambas tablas locales quedaron vacías.
+Si falla, conservar la evidencia de `systemd` y auditoría **sin copiar datos clínicos**; no marcar días como completados a mano ni eliminar registros clínicos para forzar un reintento. La recuperación usa la auditoría para retomar fechas no completadas.
 
-**Importante:** recuperación y bloqueos global y por fecha validados con PostgreSQL local y procesos simulados. La renovación de token está pendiente de comprobar en WSL. No ejecutar cargas clínicas reales mientras persistan salvaguardas pendientes.
+## 8. Código y documentación
 
-Las fechas se expresan como `YYYY-MM-DD`. No se admiten días posteriores a ayer en `America/Bogota`. Para intervalos, se requieren ambas fechas y `--date` no se puede combinar con ellas.
+- `src/config.py`: lectura y validación de variables de entorno.
+- `src/auth.py` / `src/client.py`: autenticación y consumo de MediCloud.
+- `src/dates.py`: fechas en `America/Bogota`.
+- `src/daily.py`: CLI diario, fechas manuales, `--dry-run` y `--recover`.
+- `src/validation.py` / `src/schema.py`: contrato del lote y detección de deriva.
+- `src/storage.py` / `src/audit.py`: almacenamiento, idempotencia, bloqueos y auditoría.
+- `schemas/cuestionarios_v1.json`: referencia versionada de campos.
+- `sql/001_create_clisueno_questionaries.sql`: DDL inicial de la tabla.
+- `tests/`: suite de pruebas.
+- `TODO.md`: tareas de aceptación del MVP y evoluciones posteriores.
+- `CHANGELOG.md`: historial de cambios de versiones y despliegues.
+- `v1.0.0`: marcador de versión, archivo **vacío y sin extensión**.
 
-Cada fecha se consulta por separado, de modo que respeta el límite de la API de 10 días por petición. En modo normal, cada día confirma cuestionarios y auditoría en la misma transacción; los días con `success` anterior se omiten. Un fallo detiene el intervalo y no revierte las fechas ya confirmadas. En `--dry-run` no se consulta ni se modifica PostgreSQL.
+## 9. Pendientes y límites del MVP
 
-### 7.1.1. Renovación controlada del token
+- **Pendiente para aceptación final:** comprobar la primera ejecución diaria real del temporizador el **18-oct-2026, 03:00 `America/Bogota`** y confirmar fecha nueva, auditoría y ausencia de errores.
+- Integrar `feature/postgresql-storage` en `main` cuando se cierre la aceptación; después sincronizar el clon del servidor.
+- La semántica global de `id` es un supuesto protegido contra colisiones, no una garantía de la API.
+- Alertas avanzadas, paneles Metabase, refactorización detallada de fallos HTTP y extracción histórica específica quedan en **Fase 2**.
 
-Cada fecha obtiene inicialmente un Bearer Token nuevo. Si la consulta a
-`/apisueno/getCuestionarioSueno` responde con **HTTP 401**, el proceso solicita
-un nuevo token a `/auth/getToken` y repite **esa consulta una sola vez**.
-Un segundo 401 provoca un error `AUTH_ERROR` y detiene la fecha; si la
-renovación falla, también se registra `AUTH_ERROR`.
-
-**HTTP 403 no renueva el token** y se trata como error de consulta
-`API_ERROR`. Los errores transitorios 429/5xx conservan los reintentos HTTP
-ya existentes; no activan renovación de token. Los mensajes de excepción
-y los logs no incluyen el token ni el contenido de la respuesta.
-
-Este mecanismo se aplica tanto a ejecuciones normales como a `--dry-run`;
-este último continúa sin acceder a PostgreSQL. La implementación
-se encuentra en la rama de desarrollo **pendiente de validación WSL**.
-
-### 7.2. Recuperación explícita de días pendientes (pendiente de validación)
-
-La recuperación **no se activa por defecto**. Requiere definir una fecha inicial de operación en el `.env` local, por ejemplo `CLISUENO_START_DATE=AAAA-MM-DD` (sustituir por la fecha autorizada). No se incluye un valor predeterminado para impedir cargas históricas involuntarias.
-
-```bash
-# REQUIERE AUTORIZACIÓN Y VALIDACIÓN PREVIA; ESCRIBE DATOS EN POSTGRESQL
-python -m src.daily --recover
-```
-
-El modo `--recover` consulta `audit.load_control` para seleccionar, desde esa fecha hasta ayer en `America/Bogota`, únicamente los días sin `success` para el pipeline y tabla de Clisueno. Los `failed` no completan un día. Un día exitoso con cero cuestionarios sí cuenta como completado. Procesa por orden cronológico y como máximo **7 fechas pendientes por ejecución**. Una ejecución posterior continúa desde los días que sigan pendientes; un error detiene el lote, sin deshacer éxitos anteriores.
-
-Se reutiliza el mismo procesamiento diario para validación, idempotencia y transacción conjunta cuestionarios+auditoría. Un bloqueo exclusivo de sesión PostgreSQL impide que dos ejecuciones `--recover` consulten y procesen fechas simultáneamente; se mantiene desde la selección de pendientes hasta terminar (o fallar) el último día. La conexión se cierra para liberar el bloqueo, incluso ante fallo del proceso. Esto complementa los bloqueos transaccionales diarios que protegen las inserciones. Las peticiones son de un solo día, dentro del límite de API.
-
-**Concurrencia mixta:** además del bloqueo global de `--recover`, cada ejecución normal (diaria, `--date`, intervalo o día de recuperación) adquiere un bloqueo exclusivo de sesión **por fecha** antes de comprobar la auditoría, autenticarse y consultar MediCloud; lo libera después de confirmar la persistencia o registrar el fallo. Se utiliza la clave negativa de la fecha en el mismo espacio de claves, separada de la clave positiva del bloqueo transaccional durante la escritura: ambas pueden coexistir en conexiones distintas. Si el día ya está en curso, se devuelve error sin consultar MediCloud ni crear un registro `failed` espurio. Otras fechas pueden procesarse en paralelo. `--dry-run` sigue sin acceder a PostgreSQL y por tanto **no adquiere este bloqueo**; las simulaciones simultáneas pueden repetir consultas sin persistir.
-
-No se permite combinar `--recover` con `--date`, `--start-date`, `--end-date` ni `--dry-run`. Esto último mantiene la garantía de que `--dry-run` no accede a PostgreSQL: identificar pendientes requiere leer auditoría. **No ejecutar todavía el comando de recuperación contra datos clínicos**, hasta confirmar las pruebas pendientes y la fecha inicial autorizada.
-
-### 7.2. Frecuencia automática prevista
-
-- Frecuencia: diaria, a las 03:00, `America/Bogota`.
-- Fecha por defecto: día calendario anterior.
-- Programación futura mediante `systemd timer`.
-- Implementación de recuperación explícita añadida a la rama de desarrollo, pendiente de pruebas WSL y PostgreSQL local; invocación por temporizador `systemd` todavía no implementada.
-
-### 7.3. Requisitos operativos
-
-- Ejecución sin intervención humana.
-- Recuperación automática de días pendientes.
-- Prevención de duplicados e idempotencia.
-- Auditoría de ejecuciones y errores.
-- Control de concurrencia y recuperación ante interrupciones.
-- Logs estructurados sin datos identificables.
-
-### 7.4. Inmutabilidad
-
-Se adopta como supuesto funcional que los cuestionarios registrados no se modifican posteriormente. El `id` se asume globalmente único; un `id` ya almacenado con distinto hash provoca rollback. Este supuesto deberá revisarse si cambia MediCloud.
-
-### 7.5. Carga histórica
-
-La carga histórica automática sigue aplazada; un intervalo manual explícito no supone activar el reprocesamiento histórico desatendido.
-
-## 8. Despliegue previsto
-
-**Servidor:** `mineriaino`.
-
-**Ubicación lógica:**
-
-`/opt/apps/etl/obsino/Clisueno/cuestionarios`
-
-Conforme a las políticas del servidor:
-
-- Código desplegado bajo `/opt/apps`.
-- Datos operativos bajo `/srv/data`.
-- Backups bajo `/srv/backups`.
-- Credenciales fuera del repositorio y protegidas por permisos.
-- Cambios operativos documentados en el README y CHANGELOG del servidor.
-
-El desarrollo se realiza localmente.
-
-La aplicación todavía no se ha desplegado en `mineriaino`.
-
-## 9. Seguridad
-
-El proyecto procesa información clínica y datos identificativos.
-
-Requisitos:
-
-- No almacenar credenciales en Git.
-- No registrar tokens ni datos personales en logs.
-- Restringir el acceso a los datos extraídos.
-- Mantener HTTPS para la comunicación con MediCloud.
-- Gestionar errores sin exponer secretos.
-- Utilizar privilegios mínimos en PostgreSQL.
-- Rotar las credenciales utilizadas durante las pruebas antes
-  del despliegue definitivo.
-
-## 10. Limitaciones actuales
-
-- La recuperación de fechas pendientes con `--recover` está implementada en la rama, pero todavía no se ha validado en WSL ni habilitado para operación.
-- No se ha configurado `systemd` ni desplegado el proyecto en `mineriaino`.
-- La recuperación aún necesita pruebas específicas de lectura de auditoría y reanudación en PostgreSQL local.
-- Está pendiente el manejo integral de un token expirado durante una consulta y las alertas operativas.
-- El significado y unicidad global del campo `id` son supuestos funcionales aún no contrastados externamente.
-- La carga histórica automática no está implementada.
-
-Consultar `TODO.md` para conocer las prioridades y las pruebas confirmadas.
-
-## 11. Control de versiones
-
-Repositorio independiente: `moafar/INO_Clisueno_Questionaries`.
-
-Rama actual de desarrollo: `feature/postgresql-storage`. Los cambios aún no se han integrado en `main`.
-
+Consultar el `TODO.md` actualizado para el detalle de cierre y evoluciones.
